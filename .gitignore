@@ -1,0 +1,4 @@
+backend/shell.nix
+backend/.venv
+backend/tmp/input.pdf
+backend/tmp/slides/*
