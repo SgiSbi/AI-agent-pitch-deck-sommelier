@@ -66,7 +66,7 @@ Follow this exact structure, including ENTERs and TABs:
 
   - Оптимистичный сценарий: [расчет с учетом потенциала расширения]
 
-  - Потолок выручки: [диапазон годовой выручки в рублях]
+  - Потолок выручки: [диапазон годовой выручки в рублях, примерная оценка, ни в коем случае невозможна монополизация ниши]
 
 ### 2.4. Итоговая оценка рынка
 
@@ -147,5 +147,6 @@ CRITICAL RULES:
   * NEVER invent specific numbers absent from slides AND not found via search
 - Be brutally honest in Sanity Check. Distinguish between "территория покрытия" and "платежеспособный спрос".
 - Keep analysis concise but data-dense. No fluff.
+- ФСИ - при упоминании, фонд содействия инновациям
 
 Begin analysis now. Slide content follows:
