@@ -2,3 +2,5 @@ backend/shell.nix
 backend/.venv
 backend/tmp/input.pdf
 backend/tmp/slides/*
+backend/tmp/
+backend/result/
