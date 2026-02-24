@@ -95,6 +95,7 @@ N. https://example.com/pageN
 
 CRITICAL RULES:
 - ABSOLUTELY NO EMOJI OR SPECIAL SYMBOLS (no sharks, swords, graves, shields, magnifiers, warnings, checks, crosses, stars, arrows). Plain text only.
+- 3.1 В Прямых конкурентах, косвенных конкурентах и экосистемы и гиганты НЕ ДОЛЖНО быть повторений
 - TABLE FORMAT IN 3.2 is MARKDOWN
   * For named competitors → search: "[название конкурента] официальный сайт характеристики цена 2024 2025"
   * For technology validation → search: "[технология] проблемы ограничения дрейф температура вибрация"
