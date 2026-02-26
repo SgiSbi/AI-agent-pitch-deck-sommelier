@@ -4,3 +4,11 @@ backend/tmp/input.pdf
 backend/tmp/slides/*
 backend/tmp/
 backend/result/
+backend/tmp/*
+.venv/
+.vscode/
+.env
+frontend/.env
+result
+backend/.env.backend
+backend/__pycache__

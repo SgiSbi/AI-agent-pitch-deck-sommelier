@@ -59,6 +59,6 @@ if __name__ == "__main__":
     images = pdf_to_images(
         pdf_path=pdf_file,
         output_folder="tmp/slides",
-        dpi=55,
+        dpi=70,
         image_format="png"
     )
