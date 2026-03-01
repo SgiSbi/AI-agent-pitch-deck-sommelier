@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from .pipeline import (
     run_full_pipeline,
     TMP_DIR,
+    RAW_PRESENTATIONS_ROOT,
     extract_slides_stage,
     qwen_from_slides_stage,
     run_deepseek_sections,
@@ -20,7 +21,7 @@ from .qwen_image import analyze_image_with_qwen
 app = FastAPI(title="Pitch Deck Analyzer API")
 
 
-def _save_uploaded_pdf(file: UploadFile) -> Path:
+def _save_uploaded_pdf(file: UploadFile) -> tuple[Path, str]:
     """
     Сохраняет загруженный PDF во временный файл и возвращает путь.
     """
@@ -28,14 +29,25 @@ def _save_uploaded_pdf(file: UploadFile) -> Path:
         raise HTTPException(status_code=400, detail="Ожидается PDF файл.")
 
     TMP_DIR.mkdir(parents=True, exist_ok=True)
-    run_id = uuid.uuid4().hex
-    filename = file.filename or f"input_{run_id}.pdf"
-    pdf_path = TMP_DIR / f"{run_id}_{filename}"
+    RAW_PRESENTATIONS_ROOT.mkdir(parents=True, exist_ok=True)
 
+    original_name = file.filename or "presentation.pdf"
+    safe_stem = Path(original_name).stem.replace(" ", "_")
+    if not safe_stem:
+        safe_stem = "presentation"
+
+    # Дата в формате ГГГГММДД (GMT+7)
+    from datetime import datetime, timedelta, timezone
+
+    date_str = datetime.now(timezone(timedelta(hours=7))).strftime("%Y%m%d")
+    run_id = uuid.uuid4().hex[:8]
+    presentation_dir = f"{safe_stem}_{date_str}_{run_id}"
+
+    pdf_path = RAW_PRESENTATIONS_ROOT / f"{presentation_dir}.pdf"
     with pdf_path.open("wb") as f:
         f.write(file.file.read())
 
-    return pdf_path
+    return pdf_path, presentation_dir
 
 
 class DeepSeekSectionRequest(BaseModel):
@@ -49,8 +61,8 @@ def process_pdf(file: UploadFile = File(...)) -> FileResponse:
     """
     Полный пайплайн: принимает PDF-файл и возвращает DOCX.
     """
-    pdf_path = _save_uploaded_pdf(file)
-    docx_path: Path = run_full_pipeline(pdf_path)
+    pdf_path, presentation_dir = _save_uploaded_pdf(file)
+    docx_path: Path = run_full_pipeline(pdf_path, presentation_dir)
 
     if not docx_path.exists():
         raise HTTPException(status_code=500, detail="Не удалось сгенерировать DOCX.")
@@ -67,9 +79,7 @@ def stage_extract_slides(file: UploadFile = File(...)) -> JSONResponse:
     """
     Этап 1: только извлечение слайдов из PDF.
     """
-    pdf_path = _save_uploaded_pdf(file)
-    run_id = uuid.uuid4().hex
-    presentation_dir = f"{pdf_path.stem}_{run_id}"
+    pdf_path, presentation_dir = _save_uploaded_pdf(file)
     image_paths = extract_slides_stage(pdf_path=pdf_path, presentation_dir=presentation_dir)
     return JSONResponse(
         {
@@ -84,9 +94,7 @@ def stage_qwen_from_pdf(file: UploadFile = File(...)) -> JSONResponse:
     """
     Этап 1 + 2: PDF -> слайды -> Qwen.
     """
-    pdf_path = _save_uploaded_pdf(file)
-    run_id = uuid.uuid4().hex
-    presentation_dir = f"{pdf_path.stem}_{run_id}"
+    pdf_path, presentation_dir = _save_uploaded_pdf(file)
     image_paths = extract_slides_stage(pdf_path=pdf_path, presentation_dir=presentation_dir)
     qwen_text = qwen_from_slides_stage(image_paths=image_paths, presentation_dir=presentation_dir)
     return JSONResponse(
@@ -125,52 +133,13 @@ def stage_deepseek_section(body: DeepSeekSectionRequest) -> JSONResponse:
         }
     )
 
-
-@app.post("/debug/pdf-to-images")
-def debug_pdf_to_images(file: UploadFile = File(...)) -> JSONResponse:
-    """
-    DEBUG: только конвертация PDF в изображения.
-    Возвращает список путей к слайдам.
-    """
-    pdf_path = _save_uploaded_pdf(file)
-    run_id = uuid.uuid4().hex
-    presentation_dir = f"{pdf_path.stem}_debug_{run_id}"
-    image_paths = extract_slides_stage(pdf_path=pdf_path, presentation_dir=presentation_dir)
-
-    # Возвращаем относительные пути для удобства
-    rel_paths = [str(Path(p).relative_to(Path.cwd())) for p in image_paths]
-    return JSONResponse({"images": rel_paths})
-
-
-@app.post("/debug/qwen-from-pdf")
-def debug_qwen_from_pdf(file: UploadFile = File(...)) -> JSONResponse:
-    """
-    DEBUG: PDF -> изображения -> Qwen.
-    Возвращает сырой текст, извлечённый Qwen.
-    """
-    pdf_path = _save_uploaded_pdf(file)
-    run_id = uuid.uuid4().hex
-    presentation_dir = f"{pdf_path.stem}_debug_{run_id}"
-    image_paths = extract_slides_stage(pdf_path=pdf_path, presentation_dir=presentation_dir)
-
-    qwen_text = qwen_from_slides_stage(image_paths=image_paths, presentation_dir=presentation_dir)
-    return JSONResponse(
-        {
-            "presentation_dir": presentation_dir,
-            "qwen_text": qwen_text,
-        }
-    )
-
-
 @app.post("/debug/markdown-from-pdf")
 def debug_markdown_from_pdf(file: UploadFile = File(...)) -> JSONResponse:
     """
     DEBUG: PDF -> изображения -> Qwen -> DeepSeek (1–5) -> финальный вердикт.
     Возвращает полный markdown без генерации DOCX.
     """
-    pdf_path = _save_uploaded_pdf(file)
-    run_id = uuid.uuid4().hex
-    presentation_dir = f"{pdf_path.stem}_debug_{run_id}"
+    pdf_path, presentation_dir = _save_uploaded_pdf(file)
     image_paths = extract_slides_stage(pdf_path=pdf_path, presentation_dir=presentation_dir)
 
     qwen_text = qwen_from_slides_stage(image_paths=image_paths, presentation_dir=presentation_dir)

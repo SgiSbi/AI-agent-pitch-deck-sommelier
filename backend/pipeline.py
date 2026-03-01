@@ -1,6 +1,7 @@
 import base64
 import json
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Tuple
 
@@ -13,14 +14,24 @@ from .formatting import convert_md_to_docx, format_docx_file
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 PROMPTS_DIR = BASE_DIR / "promts"
-TMP_DIR = BASE_DIR/ "backend" / "tmp"
+TMP_DIR = BASE_DIR / "backend" / "tmp"
 RESULT_DIR = BASE_DIR / "backend" / "result"
 
+RAW_PRESENTATIONS_ROOT = TMP_DIR / "raw_presentations"
 SLIDES_ROOT = TMP_DIR / "slides"
 TEXT_FROM_SLIDES_ROOT = TMP_DIR / "text_from_slides"
-QWEN_REQUESTS_DIR = TMP_DIR / "qwen_requests"
-QWEN_RESPONSES_DIR = TMP_DIR / "qwen_responses"
+QWEN_REQUESTS_DIR = TMP_DIR / "qwen" / "requests"
+QWEN_RESPONSES_DIR = TMP_DIR / "qwen" / "responses"
 DEEPSEEK_ROOT = TMP_DIR / "deepseek"
+
+
+def _ts() -> str:
+    """Текущее время в GMT+7 в удобном формате."""
+    return datetime.now(timezone(timedelta(hours=7))).strftime("%Y-%m-%d %H:%M:%S GMT+7")
+
+
+def _log(component: str, message: str) -> None:
+    print(f"[{_ts()}] [{component}] {message}")
 
 
 def _load_prompt(filename: str) -> str:
@@ -31,6 +42,7 @@ def _load_prompt(filename: str) -> str:
 def _ensure_dirs() -> None:
     TMP_DIR.mkdir(parents=True, exist_ok=True)
     RESULT_DIR.mkdir(parents=True, exist_ok=True)
+    RAW_PRESENTATIONS_ROOT.mkdir(parents=True, exist_ok=True)
     SLIDES_ROOT.mkdir(parents=True, exist_ok=True)
     TEXT_FROM_SLIDES_ROOT.mkdir(parents=True, exist_ok=True)
     QWEN_REQUESTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -62,16 +74,16 @@ def extract_slides_stage(pdf_path: Path, presentation_dir: str) -> List[str]:
     slides_dir = SLIDES_ROOT / presentation_dir
     slides_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"[SLIDES] Start processing PDF: {pdf_path}")
-    print(f"[SLIDES] Target directory: {slides_dir}")
+    _log("SLIDES", f"Start processing PDF: {pdf_path}")
+    _log("SLIDES", f"Target directory: {slides_dir}")
 
     try:
         image_paths = pdf_to_slide_images(pdf_path=pdf_path, slides_dir=slides_dir)
     except Exception as e:
-        print(f"[SLIDES] Error while processing slides for '{pdf_path}': {e}")
+        _log("SLIDES", f"Error while processing slides for '{pdf_path}': {e}")
         raise
 
-    print("slide processing completed successfully")
+    _log("SLIDES", "slide processing completed successfully")
     return image_paths
 
 
@@ -136,13 +148,13 @@ def qwen_from_slides_stage(image_paths: List[str], presentation_dir: str) -> str
         "messages": messages,
     }
 
-    req_dir = QWEN_REQUESTS_DIR
-    resp_dir = QWEN_RESPONSES_DIR
+    req_dir = QWEN_REQUESTS_DIR / presentation_dir
+    resp_dir = QWEN_RESPONSES_DIR / presentation_dir
     req_dir.mkdir(parents=True, exist_ok=True)
     resp_dir.mkdir(parents=True, exist_ok=True)
 
-    req_path = req_dir / f"{presentation_dir}.json"
-    resp_path = resp_dir / f"{presentation_dir}.json"
+    req_path = req_dir / "request.json"
+    resp_path = resp_dir / "response.json"
 
     # Сохраняем структуру запроса в файл (image_url сокращаем, чтобы не писать base64)
     content_for_log = []
@@ -160,29 +172,29 @@ def qwen_from_slides_stage(image_paths: List[str], presentation_dir: str) -> str
     }
     url = config.qwen_api_base.rstrip("/") + "/chat/completions"
 
-    print(f"[QWEN] Sending request for '{presentation_dir}' ({len(image_paths)} slides) to {url}")
-    print(f"[QWEN] Request metadata saved to: {req_path}")
+    _log("QWEN", f"Sending request for '{presentation_dir}' ({len(image_paths)} slides) to {url}")
+    _log("QWEN", f"Request metadata saved to: {req_path}")
 
     resp = requests.post(url, json=payload, headers=headers, timeout=600)
     if not resp.ok:
-        print(f"[QWEN] Error response status={resp.status_code} body={resp.text}")
+        _log("QWEN", f"Error response status={resp.status_code} body={resp.text}")
         resp.raise_for_status()
 
     resp_json = resp.json()
     resp_path.write_text(json.dumps(resp_json, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[QWEN] Response saved to: {resp_path}")
+    _log("QWEN", f"Response saved to: {resp_path}")
 
     try:
         full_content = resp_json["choices"][0]["message"]["content"]
     except Exception as e:
-        print(f"[QWEN] Unexpected response format: {resp_json}")
+        _log("QWEN", f"Unexpected response format: {resp_json}")
         raise RuntimeError("Unexpected Qwen response format") from e
 
     text_dir = TEXT_FROM_SLIDES_ROOT / presentation_dir
     text_dir.mkdir(parents=True, exist_ok=True)
     text_file = text_dir / "text_from_slides.txt"
     text_file.write_text(full_content, encoding="utf-8")
-    print(f"[QWEN] Extracted text saved to: {text_file}")
+    _log("QWEN", f"Extracted text saved to: {text_file}")
 
     return full_content
 
@@ -225,19 +237,22 @@ def send_section_to_deepseek(prompt_filename: str, qwen_text: str, presentation_
     req_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     url = config.deepseek_api_base.rstrip("/") + "/chat/completions"
-    print(f"[DEEPSEEK:{prompt_name}] Sending request for '{presentation_dir}' to {url}")
-    print(f"[DEEPSEEK:{prompt_name}] Request saved to: {req_path}")
+    _log(f"DEEPSEEK:{prompt_name}", f"Sending request for '{presentation_dir}' to {url}")
+    _log(f"DEEPSEEK:{prompt_name}", f"Request saved to: {req_path}")
 
     resp = requests.post(url, json=payload, headers=headers, timeout=600)
-    resp.raise_for_status()
+    if not resp.ok:
+        _log(f"DEEPSEEK:{prompt_name}", f"Error response status={resp.status_code} body={resp.text}")
+        resp.raise_for_status()
+
     resp_json = resp.json()
     resp_path.write_text(json.dumps(resp_json, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[DEEPSEEK:{prompt_name}] Response saved to: {resp_path}")
+    _log(f"DEEPSEEK:{prompt_name}", f"Response saved to: {resp_path}")
 
     try:
         content = resp_json["choices"][0]["message"]["content"]
     except Exception as e:
-        print(f"[DEEPSEEK:{prompt_name}] Unexpected response format: {resp_json}")
+        _log(f"DEEPSEEK:{prompt_name}", f"Unexpected response format: {resp_json}")
         raise RuntimeError("Unexpected DeepSeek response format") from e
 
     return content.strip()
@@ -273,7 +288,7 @@ def run_deepseek_sections(qwen_text: str, presentation_dir: str) -> Tuple[List[s
     return md_parts, intermediate_md
 
 
-def run_final_verdict(intermediate_md: str) -> str:
+def run_final_verdict(intermediate_md: str, presentation_dir: str) -> str:
     """
     Шаг 4. Финальный запрос в DeepSeek по промпту 6 с добавлением всего markdown.
     """
@@ -282,7 +297,47 @@ def run_final_verdict(intermediate_md: str) -> str:
         f"{final_prompt_base.strip()}\n\n"
         f"---REPORTS START---\n{intermediate_md}\n---REPORTS END---"
     )
-    return call_deepseek(final_full_prompt).strip()
+
+    prompt_name = "final_verdict"
+    base_dir = DEEPSEEK_ROOT / prompt_name
+    req_dir = base_dir / "requests"
+    resp_dir = base_dir / "responses"
+    req_dir.mkdir(parents=True, exist_ok=True)
+    resp_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = {
+        "model": config.deepseek_model,
+        "messages": [{"role": "user", "content": final_full_prompt}],
+    }
+    headers = {
+        "Authorization": f"Bearer {config.deepseek_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    req_path = req_dir / f"{presentation_dir}.json"
+    resp_path = resp_dir / f"{presentation_dir}.json"
+    req_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    url = config.deepseek_api_base.rstrip("/") + "/chat/completions"
+    _log(f"DEEPSEEK:{prompt_name}", f"Sending final verdict for '{presentation_dir}' to {url}")
+    _log(f"DEEPSEEK:{prompt_name}", f"Request saved to: {req_path}")
+
+    resp = requests.post(url, json=payload, headers=headers, timeout=600)
+    if not resp.ok:
+        _log(f"DEEPSEEK:{prompt_name}", f"Error response status={resp.status_code} body={resp.text}")
+        resp.raise_for_status()
+
+    resp_json = resp.json()
+    resp_path.write_text(json.dumps(resp_json, ensure_ascii=False, indent=2), encoding="utf-8")
+    _log(f"DEEPSEEK:{prompt_name}", f"Response saved to: {resp_path}")
+
+    try:
+        content = resp_json["choices"][0]["message"]["content"]
+    except Exception as e:
+        _log(f"DEEPSEEK:{prompt_name}", f"Unexpected response format: {resp_json}")
+        raise RuntimeError("Unexpected DeepSeek final verdict format") from e
+
+    return content.strip()
 
 
 def build_full_markdown(section_texts: List[str], final_text: str) -> str:
@@ -302,7 +357,7 @@ def markdown_to_docx(md_path: Path, docx_path: Path) -> None:
     format_docx_file(docx_path, docx_path)
 
 
-def run_full_pipeline(pdf_path: Path) -> Path:
+def run_full_pipeline(pdf_path: Path, presentation_dir: str) -> Path:
     """
     Полный пайплайн end-to-end:
     1) PDF -> PNG слайды
@@ -315,10 +370,8 @@ def run_full_pipeline(pdf_path: Path) -> Path:
     """
     _ensure_dirs()
 
-    run_id = uuid.uuid4().hex
-    presentation_dir = f"{pdf_path.stem}_{run_id}"
-    md_path = TMP_DIR / f"report_{run_id}.md"
-    docx_path = RESULT_DIR / f"report_{run_id}.docx"
+    md_path = TMP_DIR / f"{presentation_dir}.md"
+    docx_path = RESULT_DIR / f"{presentation_dir}.docx"
 
     # 1) PDF -> изображения
     image_paths = extract_slides_stage(pdf_path=pdf_path, presentation_dir=presentation_dir)
@@ -333,7 +386,7 @@ def run_full_pipeline(pdf_path: Path) -> Path:
     )
 
     # 4) Финальный вердикт (секция 6)
-    final_text = run_final_verdict(intermediate_md=intermediate_md)
+    final_text = run_final_verdict(intermediate_md=intermediate_md, presentation_dir=presentation_dir)
 
     # 5) Сборка markdown и конвертация в DOCX
     full_md = build_full_markdown(section_texts=section_texts, final_text=final_text)

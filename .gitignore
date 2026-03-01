@@ -8,7 +8,7 @@ backend/tmp/*
 .venv/
 .vscode/
 .env
-frontend/.env
+frontend/.env.frontend
 result
 backend/.env.backend
 backend/__pycache__
