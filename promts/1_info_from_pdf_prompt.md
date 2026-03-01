@@ -120,7 +120,7 @@ URL/Контакт	Контекст/Комментарий
 [Извлеки ВСЕ российские email, Telegram-хэндлы, веб-сайты, номера грантов РФ и прочие ссылки на внешние источники, которые упоминаются в слайдах]
 
 СТРОГИЕ ПРАВИЛА:
-- ВАЖНО! Byllshit score = x = 10 - твоя оценка bullshit score, формат вывода [x/10]
+- ВАЖНО! Bullshit score = x = 10 - твоя оценка bullshit score, формат вывода [x/10]
 - АБСОЛЮТНЫЙ ЗАПРЕТ НА EMOJI И СПЕЦСИМВОЛЫ (никаких 📑, 🚩, 🔗, •, →, ★). Используй только тире (-) для списков и стандартную пунктуацию.
 - Если данных нет → пиши 'Информация отсутствует' (НИКОГДА не выдумывай).
 - Сохраняй оригинальный язык цитат и терминов (например, 'Студенческий стартап', 'ПИШ ТУСУР').
@@ -136,5 +136,30 @@ URL/Контакт	Контекст/Комментарий
 - ИЗВЛЕКАЙ ВЕСЬ ТЕКСТ со слайда без сокращений и фильтрации. Не пропускай заголовки, подзаголовки, сноски, подписи к изображениям.
 - Номера слайдов предоставляются системой в формате «Слайд N: ...». Отслеживай их точно и УКАЗЫВАЙ ПОСЛЕ КАЖДОГО ФАКТА/УТВЕРЖДЕНИЯ.
 - ОГРАНИЧЕНИЕ ПОИСКА: Веб-поиск разрешен ТОЛЬКО в разделе 1.6 для верификации опыта команды. Для разделов 1.7 (Запрос), 1.3 (Рынок) и всех остальных использование внешнего поиска ЗАПРЕЩЕНО. Данные должны быть взяты исключительно из файлов презентации.
+ - WORD COUNT CONSTRAINT (500-600 WORDS). Your internal counter is inaccurate. To stay within limits, follow the structural caps below. Exceeding 600 words is strictly prohibited.
+
+PARAGRAPH & SENTENCE BUDGET (MANDATORY):
+
+Section 1 (Bullshit Score, Ясность, Red Flags, One-liner): Maximum 5-7 sentences total.
+
+Section 1.1 (Проблема): Maximum 3-4 sentences.
+
+Section 1.2 (Решение): Maximum 4-5 sentences.
+
+Section 1.3 (Рынок): Maximum 4-5 sentences (TAM/SAM/SOM — only numbers, no prose).
+
+Section 1.4 (Бизнес-модель): Maximum 2-3 sentences.
+
+Section 1.5 (Трекшн): Maximum 4-5 sentences (list format, no fluff).
+
+Section 1.6 (Команда): Maximum 3-4 sentences per founder + links. NO biographies, only facts.
+
+Section 1.7 (Запрос): Maximum 2-3 sentences.
+
+Section 1.8 (Графики): Maximum 2-3 sentences per meaningful visual. If >3 visuals, describe only the top 3 most important.
+
+Section 1.9 (Ссылки): Table only. No introductory text.
+
+THE "DENSITY" RULE: If the total feels close to the limit, strip all adverbs, adjectives, and meta-commentary. Leave only: Subject — Verb — Number — Fact. It is better to sound robotic and be at 550 words than to be descriptive and hit 700.
 
 [полный анализ презентации по разделам 1 - 1.9, включая все подпункты 1.1 - 1.9. КАЖДОЕ утверждение содержит ссылку [Слайд N] или URL источника для опыта команды. ОТВЕТ ДОЛЖЕН НАЧАТЬСЯ СТРОГО С "1. Информация из презентации" И ЗАВЕРШИТЬСЯ ПОСЛЕ РАЗДЕЛА 1.9]
