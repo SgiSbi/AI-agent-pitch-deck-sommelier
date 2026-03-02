@@ -44,12 +44,12 @@ def pdf_to_images(pdf_path, output_folder="output_images", dpi=150, image_format
             # Сохранение изображения
             pix.save(output_path)
             image_paths.append(output_path)
-            print(f"Сохранена страница {page_num + 1} -> {output_path}")
+#            print(f"Сохранена страница {page_num + 1} -> {output_path}")
     
     finally:
         pdf_document.close()
     
-    print(f"\n✅ Успешно обработано {len(image_paths)} страниц")
+#    print(f"\n✅ Успешно обработано {len(image_paths)} страниц")
     return image_paths
 
 

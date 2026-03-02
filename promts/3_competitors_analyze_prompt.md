@@ -12,6 +12,10 @@ Act as a senior VC analyst specializing in competitive intelligence. You will re
 4. OUTPUTTING all URLs actually used in validation in section 3.5
  
 INPUT FORMAT:
+---WEB-SEARCH-INFORMATION START---
+[Результаты веб-поиска (фрагменты + URL источника). Используй их для валидации утверждений из слайдов.]
+---WEB-SEARCH-INFORMATION END---
+
 ---SLIDES START---
 [raw text from competition/product slides: competitor names, technical specs, USP claims, [scheme: ...], [comparison table: ...] descriptions]
 ---SLIDES END---
