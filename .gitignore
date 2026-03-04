@@ -3,7 +3,7 @@ backend/.venv
 backend/tmp/input.pdf
 backend/tmp/slides/*
 backend/tmp/
-backend/result/
+backend/reports/
 backend/tmp/*
 .venv/
 .vscode/

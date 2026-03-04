@@ -5,7 +5,9 @@ import requests
 from dotenv import load_dotenv
 from pathlib import Path
 
-load_dotenv(Path(__file__).resolve().parent / ".env.backend")
+# .env.backend лежит в директории backend, на уровень выше src
+load_dotenv(Path(__file__).resolve().parents[1] / ".env.backend")
+
 
 class LLMConfig:
     """
@@ -29,7 +31,10 @@ class LLMConfig:
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_api_base: str = os.getenv("DEEPSEEK_API_BASE", "https://routerai.ru/api/v1")
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek/deepseek-r1-0528")
-    deepseek_querygen_model: str = os.getenv("DEEPSEEK_QUERYGEN_MODEL", "") or os.getenv("DEEPSEEK_MODEL", "deepseek/deepseek-r1-0528")
+    deepseek_querygen_model: str = os.getenv("DEEPSEEK_QUERYGEN_MODEL", "") or os.getenv(
+        "DEEPSEEK_MODEL",
+        "deepseek/deepseek-r1-0528",
+    )
 
 
 config = LLMConfig()
@@ -57,15 +62,12 @@ def _post_chat_completion(
         "Content-Type": "application/json",
     }
 
-    # RouterAI (и прочие OpenAI‑совместимые сервисы) используют endpoint
-    # вида: <base_url>/chat/completions
     url = base_url.rstrip("/") + "/chat/completions"
 
     resp = requests.post(url, json=payload, headers=headers, timeout=300)
     resp.raise_for_status()
     data = resp.json()
 
-    # OpenAI-совместимый формат
     try:
         return data["choices"][0]["message"]["content"]
     except Exception as e:  # pragma: no cover - защитный код
@@ -75,17 +77,14 @@ def _post_chat_completion(
 def call_qwen_with_images(prompt: str, image_paths: List[str]) -> str:
     """
     Вызов Qwen для мульти-модального анализа слайдов.
-
-    ВНИМАНИЕ: конкретный формат передачи изображений (base64 / URL / form-data)
-    зависит от выбранного API. Здесь используется упрощённый вариант:
-    мы передаём список локальных путей в system-сообщении. Вам нужно
-    адаптировать реализацию под ваш реальный endpoint.
     """
     system_msg = {
         "role": "system",
-        "content": "Ты анализируешь презентацию по изображениям слайдов. "
-                   "Ниже тебе переданы локальные пути к файлам слайдов. "
-                   "Ориентируйся на текстовый промпт пользователя.",
+        "content": (
+            "Ты анализируешь презентацию по изображениям слайдов. "
+            "Ниже тебе переданы локальные пути к файлам слайдов. "
+            "Ориентируйся на текстовый промпт пользователя."
+        ),
     }
     user_msg = {
         "role": "user",
@@ -115,7 +114,7 @@ def call_deepseek(prompt: str) -> str:
 
 def call_deepseek_querygen(prompt: str) -> str:
     """
-    Вызов DeepSeek для генерации Tavily-запросов (по умолчанию может быть другой моделью).
+    Вызов DeepSeek для генерации Tavily-запросов (может быть отдельной моделью).
     """
     user_msg = {"role": "user", "content": prompt}
     return _post_chat_completion(
@@ -124,3 +123,4 @@ def call_deepseek_querygen(prompt: str) -> str:
         model=config.deepseek_querygen_model,
         messages=[user_msg],
     )
+
