@@ -12,13 +12,13 @@ import requests
 from .llm_clients import config
 from .tavily_client import search_web
 from .test import pdf_to_images
-from .formatting import convert_md_to_docx, format_docx_file
+from .formatting import convert_md_to_docx
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 PROMPTS_DIR = BASE_DIR / "promts"
-TMP_DIR = BASE_DIR / "backend" / "tmp"
-RESULT_DIR = BASE_DIR / "backend" / "result"
+TMP_DIR = BASE_DIR / "tmp"
+RESULT_DIR = BASE_DIR / "reports"
 
 RAW_PRESENTATIONS_ROOT = TMP_DIR / "raw_presentations"
 SLIDES_ROOT = TMP_DIR / "slides"
@@ -58,6 +58,75 @@ def _ensure_dirs() -> None:
     REPORT_LOG_ROOT.mkdir(parents=True, exist_ok=True)
 
 
+def _post_deepseek(
+    payload: dict,
+    req_path: Path,
+    resp_path: Path,
+    prompt_name: str,
+    component: str = "DEEPSEEK",
+    max_retries: int = 3,
+) -> dict:
+    """
+    Унифицированный вызов DeepSeek с ретраями:
+    - повторяет запрос при HTTP 5xx/429;
+    - повторяет при формате ответа с error или content=None.
+    """
+    headers = {
+        "Authorization": f"Bearer {config.deepseek_api_key}",
+        "Content-Type": "application/json",
+    }
+    url = config.deepseek_api_base.rstrip("/") + "/chat/completions"
+
+    # Сохраняем запрос (один раз, до ретраев)
+    req_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    _log(component, f"{prompt_name}: request saved to: {req_path}")
+
+    last_err: Exception | None = None
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=600)
+            if not resp.ok:
+                _log(component, f"{prompt_name}: error status={resp.status_code} body={resp.text}")
+                if resp.status_code in (429,) or 500 <= resp.status_code <= 599:
+                    if attempt < max_retries:
+                        time.sleep(2 * attempt)
+                        continue
+                resp.raise_for_status()
+
+            resp_json = resp.json()
+            resp_path.write_text(json.dumps(resp_json, ensure_ascii=False, indent=2), encoding="utf-8")
+            _log(component, f"{prompt_name}: response saved to: {resp_path}")
+
+            # Проверяем формат: отсутствие error и строковый content
+            try:
+                choice = resp_json["choices"][0]
+                # Если провайдер вернул ошибку внутри choices
+                if isinstance(choice, dict) and choice.get("error"):
+                    raise RuntimeError(f"DeepSeek inner error: {choice['error']}")
+                content = choice["message"]["content"]
+                if not isinstance(content, str):
+                    raise TypeError(f"DeepSeek content is not a string: {type(content)}")
+            except Exception as e:
+                last_err = e
+                _log(component, f"{prompt_name}: unexpected response format (attempt {attempt}): {resp_json}")
+                if attempt < max_retries:
+                    time.sleep(2 * attempt)
+                    continue
+                raise
+
+            return resp_json
+
+        except Exception as e:
+            last_err = e
+            if attempt < max_retries:
+                time.sleep(2 * attempt)
+                continue
+            break
+
+    raise RuntimeError(f"DeepSeek request failed for '{prompt_name}' after retries") from last_err
+
+
 def _parse_tavily_query_plan(text: str) -> Dict[str, List[str]]:
     """
     Парсит вывод `additional_prompt_for_websearch.md` в структуру:
@@ -76,7 +145,8 @@ def _parse_tavily_query_plan(text: str) -> Dict[str, List[str]]:
         if not line:
             continue
 
-        if line.endswith(":") and not line.startswith("-"):
+        # Категория: "Команда:" / "Рынок:" и т.п.
+        if line.endswith(":") and not line.startswith("-") and not line.startswith("\\-"):
             current = line[:-1].strip()
             if current:
                 result.setdefault(current, [])
@@ -89,6 +159,10 @@ def _parse_tavily_query_plan(text: str) -> Dict[str, List[str]]:
             # Явно обозначенная пустота — оставляем категорию пустой
             result[current] = []
             continue
+
+        # Буллеты могут приходить как "- " или "\- " (markdown-escape).
+        if line.startswith("\\-"):
+            line = line[1:].lstrip()
 
         if line.startswith("-"):
             q = line.lstrip("-").strip()
@@ -133,28 +207,21 @@ def generate_tavily_queries_stage(qwen_text: str, presentation_dir: str) -> Dict
     raw_text_path = gen_dir / "query_plan.txt"
 
     payload = {
-        "model": config.deepseek_model,
+        "model": config.deepseek_querygen_model,
         "messages": [{"role": "user", "content": full_prompt}],
     }
-    headers = {
-        "Authorization": f"Bearer {config.deepseek_api_key}",
-        "Content-Type": "application/json",
-    }
 
-    req_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    url = config.deepseek_api_base.rstrip("/") + "/chat/completions"
-
-    _log("TAVILY:QUERYGEN", f"Generating Tavily query plan for '{presentation_dir}' via {url}")
-    _log("TAVILY:QUERYGEN", f"Request saved to: {req_path}")
-
-    resp = requests.post(url, json=payload, headers=headers, timeout=600)
-    if not resp.ok:
-        _log("TAVILY:QUERYGEN", f"Error response status={resp.status_code} body={resp.text}")
-        resp.raise_for_status()
-
-    resp_json = resp.json()
-    resp_path.write_text(json.dumps(resp_json, ensure_ascii=False, indent=2), encoding="utf-8")
-    _log("TAVILY:QUERYGEN", f"Response saved to: {resp_path}")
+    _log(
+        "PIPELINE",
+        f"Generating Tavily query plan for '{presentation_dir}' (model={config.deepseek_querygen_model})",
+    )
+    resp_json = _post_deepseek(
+        payload=payload,
+        req_path=req_path,
+        resp_path=resp_path,
+        prompt_name="tavily_query_plan",
+        component="TAVILY:QUERYGEN",
+    )
 
     try:
         content = resp_json["choices"][0]["message"]["content"]
@@ -244,21 +311,23 @@ def qwen_from_slides_stage(image_paths: List[str], presentation_dir: str) -> str
         url = config.qwen_api_base.rstrip("/") + "/chat/completions"
 
         # сохраняем метаданные запроса (без base64)
-        req_path.write_text(json.dumps(payload.get("_payload_for_log", payload), ensure_ascii=False, indent=2), encoding="utf-8")
-        _log("QWEN", f"Request metadata saved to: {req_path}")
+        req_path.write_text(
+            json.dumps(payload.get("_payload_for_log", payload), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        _log("REPORTLOG", f"Qwen request saved: {req_path}")
 
         last_err: Exception | None = None
         for attempt in range(1, 4):
-            _log("QWEN", f"POST attempt {attempt}/3 to {url}")
             try:
                 resp = requests.post(url, json=payload["_payload"], headers=headers, timeout=600)
                 if resp.ok:
                     data = resp.json()
                     resp_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-                    _log("QWEN", f"Response saved to: {resp_path}")
+                    _log("REPORTLOG", f"Qwen response saved: {resp_path}")
                     return data
 
-                _log("QWEN", f"Error response status={resp.status_code} body={resp.text}")
+                _log("REPORTLOG", f"Qwen error status={resp.status_code} body={resp.text}")
                 # ретрай только для 429/5xx, иначе сразу падаем
                 if resp.status_code in (429,) or 500 <= resp.status_code <= 599:
                     time.sleep(2 * attempt)
@@ -275,23 +344,13 @@ def qwen_from_slides_stage(image_paths: List[str], presentation_dir: str) -> str
     req_dir.mkdir(parents=True, exist_ok=True)
     resp_dir.mkdir(parents=True, exist_ok=True)
 
-    # Логируем размеры картинок (часто причина 500 — слишком большой payload)
-    try:
-        total_bytes = 0
-        for p in image_paths:
-            total_bytes += Path(p).stat().st_size
-        _log("QWEN", f"Slides: {len(image_paths)} files, total {total_bytes} bytes")
-    except Exception:
-        pass
-
     # Если слайдов много — бьём на чанки, чтобы уменьшить payload
     chunk_size = 3 if len(image_paths) > 3 else len(image_paths)
     chunks: List[List[str]] = [image_paths[i : i + chunk_size] for i in range(0, len(image_paths), chunk_size)]
 
-    _log("QWEN", f"Sending {len(chunks)} chunk(s), chunk_size={chunk_size}")
+    chunk_texts_by_idx: Dict[int, str] = {}
 
-    chunk_texts: List[str] = []
-    for idx, chunk_paths in enumerate(chunks, 1):
+    def _process_chunk(idx: int, chunk_paths: List[str]) -> None:
         # Первый элемент content — текст промпта
         content_items: list[dict] = [{"type": "text", "text": text_extraction_prompt.strip()}]
 
@@ -303,10 +362,10 @@ def qwen_from_slides_stage(image_paths: List[str], presentation_dir: str) -> str
                 data_url = f"data:image/png;base64,{b64}"
                 content_items.append({"type": "image_url", "image_url": {"url": data_url}})
             except Exception as e:
-                _log("QWEN", f"Failed to read/encode image '{img_path}': {e}")
+                _log("REPORTLOG", f"Qwen: failed to encode image '{img_path}': {e}")
 
         # payload for API + payload for log (без base64)
-        content_for_log = []
+        content_for_log: list[dict] = []
         for c in content_items:
             if c["type"] == "text":
                 t = c["text"]
@@ -320,26 +379,36 @@ def qwen_from_slides_stage(image_paths: List[str], presentation_dir: str) -> str
 
         req_path = req_dir / f"chunk_{idx:02d}_request.json"
         resp_path = resp_dir / f"chunk_{idx:02d}_response.json"
-        _log("QWEN", f"Sending chunk {idx}/{len(chunks)} ({len(chunk_paths)} slides)")
 
         resp_json = _post_qwen(payload_wrapper, req_path=req_path, resp_path=resp_path)
 
         try:
             chunk_content = resp_json["choices"][0]["message"]["content"]
         except Exception as e:
-            _log("QWEN", f"Unexpected response format: {resp_json}")
+            _log("REPORTLOG", f"Qwen: unexpected response format in chunk {idx}: {resp_json}")
             raise RuntimeError("Unexpected Qwen response format") from e
 
-        chunk_texts.append(chunk_content.strip())
+        chunk_texts_by_idx[idx] = chunk_content.strip()
+
+    # Отправляем чанки параллельно
+    with ThreadPoolExecutor(max_workers=len(chunks)) as executor:
+        futures = [
+            executor.submit(_process_chunk, idx, chunk_paths)
+            for idx, chunk_paths in enumerate(chunks, 1)
+        ]
+        # Блокируемся до завершения всех, исключения поднимутся наружу
+        for f in futures:
+            f.result()
+
+    chunk_texts: List[str] = [chunk_texts_by_idx[i] for i in sorted(chunk_texts_by_idx.keys())]
 
     full_content = "\n\n".join(chunk_texts).strip()
-    _log("QWEN", f"Combined Qwen text from {len(chunk_texts)} chunk(s) ({len(full_content)} chars)")
 
     text_dir = TEXT_FROM_SLIDES_ROOT / presentation_dir
     text_dir.mkdir(parents=True, exist_ok=True)
     text_file = text_dir / "text_from_slides.txt"
     text_file.write_text(full_content, encoding="utf-8")
-    _log("QWEN", f"Extracted text saved to: {text_file}")
+    _log("REPORTLOG", f"Qwen text saved to: {text_file}")
 
     return full_content
 
@@ -384,14 +453,23 @@ def send_section_to_deepseek(
         "5_team_analyze",
     ):
         category_map: Dict[str, List[str]] = {
-            "1_info_from_pdf": ["Команда", "Команда (дополнительно)", "Трекшн", "Appendix"],
-            "2_market_analyze": ["Рынок", "Конкуренция", "Трекшн", "Редфлаги", "Appendix"],
-            "3_competitors_analyze": ["Конкуренция", "Редфлаги", "Appendix"],
-            "4_product_analyze": ["Продукт", "Appendix", "Трекшн", "Редфлаги"],
-            "5_team_analyze": ["Команда", "Команда (дополнительно)", "Трекшн", "Редфлаги", "Appendix"],
+            # Актуальный промпт `additional_prompt_for_websearch.md` даёт категории:
+            # Команда, Рынок, Конкуренция, Продукт, Команда (дополнительно)
+            # Если в будущем промпт снова будет содержать "Редфлаги"/"Трекшн" — они будут подмешаны автоматически (см. ниже).
+            "1_info_from_pdf": ["Команда", "Команда (дополнительно)"],
+            "2_market_analyze": ["Рынок", "Конкуренция"],
+            "3_competitors_analyze": ["Конкуренция"],
+            "4_product_analyze": ["Продукт"],
+            "5_team_analyze": ["Команда", "Команда (дополнительно)"],
         }
 
         selected_categories = category_map.get(prompt_name, [])
+        # Глобальные категории, если они присутствуют в генерации запросов, прокидываем во ВСЕ промпты
+        # (частый запрос: редфлаги/трекшн как общий контекст).
+        if tavily_queries_by_category:
+            for global_cat in ("Редфлаги", "Трекшн"):
+                if global_cat in tavily_queries_by_category and global_cat not in selected_categories:
+                    selected_categories.append(global_cat)
         used_categories = selected_categories[:]
         queries: List[str] = []
         if tavily_queries_by_category and selected_categories:
@@ -416,10 +494,8 @@ def send_section_to_deepseek(
             tavily_results_path = tavily_dir / "results.json"
             tavily_results_text_path = tavily_dir / "results_text.txt"
 
-            _log(f"TAVILY:{prompt_name}", f"Start web search for '{presentation_dir}'")
-            _log(f"TAVILY:{prompt_name}", f"Target directory: {tavily_dir}")
+            _log("PIPELINE", f"Tavily search start for '{presentation_dir}' section '{prompt_name}'")
             tavily_queries_path.write_text(json.dumps(queries, ensure_ascii=False, indent=2), encoding="utf-8")
-            _log(f"TAVILY:{prompt_name}", f"Queries saved to: {tavily_queries_path}")
 
             log_fn = lambda msg: _log(f"TAVILY:{prompt_name}", msg)
             search_results, raw_responses = search_web(
@@ -449,11 +525,16 @@ def send_section_to_deepseek(
                     f"{search_results}\n\n"
                     "---WEB-SEARCH-INFORMATION END---\n\n"
                 )
-                _log(f"TAVILY:{prompt_name}", f"Results saved to: {tavily_results_path}, {tavily_results_text_path}")
-                _log(f"TAVILY:{prompt_name}", f"Injected {len(search_results)} chars into prompt")
-                _log(f"TAVILY:{prompt_name}", "Web search completed successfully")
+                _log("PIPELINE", f"Tavily search OK for section '{prompt_name}', {len(search_results)} chars")
             else:
-                _log(f"TAVILY:{prompt_name}", "No search results (API key missing or empty response)")
+                # Жёсткий режим: без данных от Tavily останавливаем весь пайплайн
+                _log(
+                    f"TAVILY:{prompt_name}",
+                    "No search results from Tavily (empty response or API error) — aborting pipeline",
+                )
+                raise RuntimeError(
+                    f"Tavily search returned no results for '{presentation_dir}' in section '{prompt_name}'"
+                )
 
     full_prompt = (
         f"{base_prompt.strip()}\n\n"
@@ -471,33 +552,21 @@ def send_section_to_deepseek(
         "model": config.deepseek_model,
         "messages": [{"role": "user", "content": full_prompt}],
     }
-    headers = {
-        "Authorization": f"Bearer {config.deepseek_api_key}",
-        "Content-Type": "application/json",
-    }
 
-    req_path = req_dir / f"{presentation_dir}.json"
-    resp_path = resp_dir / f"{presentation_dir}.json"
-
-    req_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    url = config.deepseek_api_base.rstrip("/") + "/chat/completions"
-    _log(f"DEEPSEEK:{prompt_name}", f"Sending request for '{presentation_dir}' to {url}")
-    _log(f"DEEPSEEK:{prompt_name}", f"Request saved to: {req_path}")
-
-    resp = requests.post(url, json=payload, headers=headers, timeout=600)
-    if not resp.ok:
-        _log(f"DEEPSEEK:{prompt_name}", f"Error response status={resp.status_code} body={resp.text}")
-        resp.raise_for_status()
-
-    resp_json = resp.json()
-    resp_path.write_text(json.dumps(resp_json, ensure_ascii=False, indent=2), encoding="utf-8")
-    _log(f"DEEPSEEK:{prompt_name}", f"Response saved to: {resp_path}")
+    resp_json = _post_deepseek(
+        payload=payload,
+        req_path=req_dir / f"{presentation_dir}.json",
+        resp_path=resp_dir / f"{presentation_dir}.json",
+        prompt_name=prompt_name,
+        component="DEEPSEEK",
+    )
 
     try:
         content = resp_json["choices"][0]["message"]["content"]
+        if not isinstance(content, str):
+            raise TypeError(f"DeepSeek content is not a string: {type(content)}")
     except Exception as e:
-        _log(f"DEEPSEEK:{prompt_name}", f"Unexpected response format: {resp_json}")
+        _log("DEEPSEEK", f"{prompt_name}: unexpected response format: {resp_json}")
         raise RuntimeError("Unexpected DeepSeek response format") from e
 
     # Секционный лог (один файл на секцию, потокобезопасно)
@@ -601,35 +670,25 @@ def run_final_verdict(intermediate_md: str, presentation_dir: str) -> str:
         "model": config.deepseek_model,
         "messages": [{"role": "user", "content": final_full_prompt}],
     }
-    headers = {
-        "Authorization": f"Bearer {config.deepseek_api_key}",
-        "Content-Type": "application/json",
-    }
 
-    req_path = req_dir / f"{presentation_dir}.json"
-    resp_path = resp_dir / f"{presentation_dir}.json"
-    req_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    url = config.deepseek_api_base.rstrip("/") + "/chat/completions"
-    _log(f"DEEPSEEK:{prompt_name}", f"Sending final verdict for '{presentation_dir}' to {url}")
-    _log(f"DEEPSEEK:{prompt_name}", f"Request saved to: {req_path}")
-
-    resp = requests.post(url, json=payload, headers=headers, timeout=600)
-    if not resp.ok:
-        _log(f"DEEPSEEK:{prompt_name}", f"Error response status={resp.status_code} body={resp.text}")
-        resp.raise_for_status()
-
-    resp_json = resp.json()
-    resp_path.write_text(json.dumps(resp_json, ensure_ascii=False, indent=2), encoding="utf-8")
-    _log(f"DEEPSEEK:{prompt_name}", f"Response saved to: {resp_path}")
+    _log("PIPELINE", f"Starting final verdict (section 6) for '{presentation_dir}'")
+    resp_json = _post_deepseek(
+        payload=payload,
+        req_path=req_dir / f"{presentation_dir}.json",
+        resp_path=resp_dir / f"{presentation_dir}.json",
+        prompt_name=prompt_name,
+        component="DEEPSEEK",
+    )
 
     try:
         content = resp_json["choices"][0]["message"]["content"]
+        if not isinstance(content, str):
+            raise TypeError(f"DeepSeek content is not a string: {type(content)}")
     except Exception as e:
-        _log(f"DEEPSEEK:{prompt_name}", f"Unexpected response format: {resp_json}")
+        _log("DEEPSEEK", f"{prompt_name}: unexpected response format: {resp_json}")
         raise RuntimeError("Unexpected DeepSeek final verdict format") from e
 
-    _log(f"DEEPSEEK:{prompt_name}", f"Final verdict generated ({len(content)} chars)")
+    _log("PIPELINE", f"Final verdict generated for '{presentation_dir}' ({len(content)} chars)")
 
     # Лог финального вердикта
     try:
@@ -667,7 +726,6 @@ def markdown_to_docx(md_path: Path, docx_path: Path) -> None:
     Шаг 5. Конвертация markdown в DOCX и применение форматирования.
     """
     convert_md_to_docx(md_path, docx_path)
-    format_docx_file(docx_path, docx_path)
 
 
 def run_full_pipeline(pdf_path: Path, presentation_dir: str) -> Path:
@@ -698,7 +756,9 @@ def run_full_pipeline(pdf_path: Path, presentation_dir: str) -> Path:
     image_paths = extract_slides_stage(pdf_path=pdf_path, presentation_dir=presentation_dir)
 
     # 2) Qwen: извлечение текста со слайдов
+    _log("PIPELINE", f"Starting Qwen for '{presentation_dir}' ({len(image_paths)} slides)")
     qwen_text = qwen_from_slides_stage(image_paths=image_paths, presentation_dir=presentation_dir)
+    _log("PIPELINE", f"Qwen finished for '{presentation_dir}' ({len(qwen_text)} chars)")
 
     # 2.5) Генерация поисковых запросов для Tavily
     tavily_queries_by_category = generate_tavily_queries_stage(qwen_text=qwen_text, presentation_dir=presentation_dir)

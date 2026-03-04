@@ -11,6 +11,7 @@ QWEN_MODEL=qwen/qwen3-vl-32b-instruct
 DEEPSEEK_API_KEY=*API-ключ*
 DEEPSEEK_API_BASE=*url api базы*
 DEEPSEEK_MODEL=deepseek/deepseek-r1-0528
+DEEPSEEK_QUERYGEN_MODEL=deepseek/deepseek-v3.2
 
 # Tavily (веб-поиск для промптов 2–5)
 TAVILY_API_KEY=*API-ключ от tavily.com*

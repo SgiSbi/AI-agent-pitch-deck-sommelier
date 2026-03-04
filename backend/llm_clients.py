@@ -5,7 +5,6 @@ import requests
 from dotenv import load_dotenv
 from pathlib import Path
 
-# загрузить frontend/.env
 load_dotenv(Path(__file__).resolve().parent / ".env.backend")
 
 class LLMConfig:
@@ -20,6 +19,7 @@ class LLMConfig:
     - DEEPSEEK_API_KEY
     - DEEPSEEK_API_BASE
     - DEEPSEEK_MODEL (например: 'deepseek/deepseek-r1-0528')
+    - DEEPSEEK_QUERYGEN_MODEL (опционально, отдельная модель для генерации поисковых запросов)
     """
 
     qwen_api_key: str = os.getenv("QWEN_API_KEY", "")
@@ -29,6 +29,7 @@ class LLMConfig:
     deepseek_api_key: str = os.getenv("DEEPSEEK_API_KEY", "")
     deepseek_api_base: str = os.getenv("DEEPSEEK_API_BASE", "https://routerai.ru/api/v1")
     deepseek_model: str = os.getenv("DEEPSEEK_MODEL", "deepseek/deepseek-r1-0528")
+    deepseek_querygen_model: str = os.getenv("DEEPSEEK_QUERYGEN_MODEL", "") or os.getenv("DEEPSEEK_MODEL", "deepseek/deepseek-r1-0528")
 
 
 config = LLMConfig()
@@ -111,3 +112,15 @@ def call_deepseek(prompt: str) -> str:
         messages=[user_msg],
     )
 
+
+def call_deepseek_querygen(prompt: str) -> str:
+    """
+    Вызов DeepSeek для генерации Tavily-запросов (по умолчанию может быть другой моделью).
+    """
+    user_msg = {"role": "user", "content": prompt}
+    return _post_chat_completion(
+        base_url=config.deepseek_api_base,
+        api_key=config.deepseek_api_key,
+        model=config.deepseek_querygen_model,
+        messages=[user_msg],
+    )
