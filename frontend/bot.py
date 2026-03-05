@@ -90,6 +90,7 @@ async def _send_to_backend(
 # =========================================== Хендлеры бота =============================================================================
 
 @dp.message(CommandStart())
+@dp.message(F.text == "🚀 Начать работу")
 async def cmd_start(message: Message) -> None:
     await message.answer(
         "👋 Привет! Я BOT для генерации аналитических отчётов по Вашим Startup'ам 🤑🤙\n\n"
@@ -98,6 +99,16 @@ async def cmd_start(message: Message) -> None:
         "👇 Выбери режим работы:",
         reply_markup=get_start_keyboard()
     )
+
+
+@dp.message(F.text == "🔄 Хочу ещё")
+async def handle_want_more(message: Message) -> None:
+    """Обработчик повторного запроса после получения отчёта"""
+    await message.answer(
+        "📎 Отлично! Отправляй новый PDF-файл с презентацией, и я подготовлю ещё один отчёт 👇",
+        reply_markup=get_start_keyboard()
+    )
+
 
 @dp.message(F.document.mime_type == "application/pdf")
 async def handle_pdf(message: Message) -> None:
@@ -114,6 +125,10 @@ async def handle_pdf(message: Message) -> None:
         logger.warning(f"User {user_id} sent oversized file: {filename} ({document.file_size / 1024 / 1024:.1f} MB)")
         return
 
+    await message.answer(f"📥 Файл «{filename}» получен! Начинаю обработку... ✨")
+    
+    await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+
     try:
         file = await bot.get_file(document.file_id)
         file_bytes = BytesIO()
@@ -125,25 +140,60 @@ async def handle_pdf(message: Message) -> None:
         return
 
     status_msg = await message.answer("⚡️ Кастую магию обработки... это займёт пару минут ✨")
+    
     await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_DOCUMENT)
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            docx_bytes = await _send_to_backend(
-                session=session,
-                file_bytes=file_bytes,
-                filename=filename,
-                timeout=BACKEND_TIMEOUT
-            )
-    except asyncio.TimeoutError:
-        await status_msg.edit_text("😴 Сервер задумался и не ответил вовремя... Попробуй чуть позже 🙏")
-        return
-    except RuntimeError as e:
-        await status_msg.edit_text(f"🤕 Ой, сервер капризничает: {e}\nПопробуй ещё раз, я подожду ❤️")
-        return
-    except Exception as e:
-        logger.exception("Unexpected error during backend call")
-        await status_msg.edit_text("💥 Наверное кто-то пролил пельмени на сервер( Я уже чиню! Попробуй через минутку 🔧")
+    docx_bytes = None
+    
+    for attempt in range(2):
+        try:
+            async with aiohttp.ClientSession() as session:
+                docx_bytes = await _send_to_backend(
+                    session=session,
+                    file_bytes=file_bytes,
+                    filename=filename,
+                    timeout=BACKEND_TIMEOUT
+                )
+            break
+            
+        except asyncio.TimeoutError:
+            logger.warning(f"Attempt {attempt + 1} failed: Timeout for user {user_id}")
+            if attempt == 0:
+                await status_msg.edit_text("⏳ Сервер отвечает медленно... Пробую ещё раз 🙏")
+                await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+                await asyncio.sleep(1)
+                file_bytes.seek(0)
+                continue
+            else:
+                await status_msg.edit_text("😴 Сервер задумался и не ответил вовремя... Попробуй чуть позже 🙏")
+                return
+                
+        except RuntimeError as e:
+            logger.warning(f"Attempt {attempt + 1} failed: RuntimeError - {e}")
+            if attempt == 0:
+                await status_msg.edit_text("🤕 Сервер капризничает... Пробую ещё раз ❤️")
+                await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+                await asyncio.sleep(1)
+                file_bytes.seek(0)
+                continue
+            else:
+                await status_msg.edit_text(f"🤕 Ой, сервер капризничает: {e}\nПопробуй ещё раз, я подожду ❤️")
+                return
+                
+        except Exception as e:
+            logger.exception(f"Attempt {attempt + 1} failed: Unexpected error for user {user_id}")
+            if attempt == 0:
+                await status_msg.edit_text("💥 Что-то пошло не так... Пробую ещё раз 🔧")
+                await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.TYPING)
+                await asyncio.sleep(1)
+                file_bytes.seek(0)
+                continue
+            else:
+                await status_msg.edit_text("💥 Наверное кто-то пролил пельмени на сервер( Я уже чиню! Попробуй через минутку 🔧")
+                return
+
+    if docx_bytes is None:
+        logger.error(f"All attempts failed for user {user_id}, file {filename}")
         return
 
     base_name = Path(filename).stem
@@ -154,6 +204,8 @@ async def handle_pdf(message: Message) -> None:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".docx", prefix="bot_") as tmp:
             tmp.write(docx_bytes)
             tmp_path = tmp.name
+        
+        await bot.send_chat_action(chat_id=message.chat.id, action=ChatAction.UPLOAD_DOCUMENT)
         
         await message.answer_document(
             document=FSInputFile(tmp_path, filename=doc_name),
@@ -189,15 +241,15 @@ async def cb_info_howto(callback: CallbackQuery):
     await callback.answer()
 
 
-@dp.callback_query(F.data == "mode:select_block")
-async def cb_mode_block(callback: CallbackQuery):
-    user_settings[callback.from_user.id] = {"mode": "block", "block": None}
-    await callback.message.edit_text(
-        "🎯 **Выбери блок для анализа:**\n\n"
-        "Я сосредоточусь только на этом разделе, чтобы сделать его максимально подробно 🔍",
-        reply_markup=get_block_selector()
-    )
-    await callback.answer()
+# @dp.callback_query(F.data == "mode:select_block")
+# async def cb_mode_block(callback: CallbackQuery):
+#     user_settings[callback.from_user.id] = {"mode": "block", "block": None}
+#     await callback.message.edit_text(
+#         "🎯 **Выбери блок для анализа:**\n\n"
+#         "Я сосредоточусь только на этом разделе, чтобы сделать его максимально подробно 🔍",
+#         reply_markup=get_block_selector()
+#     )
+#     await callback.answer()
 
 
 @dp.callback_query(F.data == "mode:full_roast")
@@ -211,26 +263,26 @@ async def cb_mode_full(callback: CallbackQuery):
     await callback.answer()
 
 
-@dp.callback_query(F.data.startswith("block:"))
-async def cb_block_select(callback: CallbackQuery):
-    block = callback.data.split(":")[1]
-    user_settings[callback.from_user.id]["block"] = block
-    
-    block_names = {
-        "info": "📄 Информация из презентации",
-        "market": "🌍 Анализ рынка",
-        "competitors": "⚔️ Анализ конкуренции",
-        "product": "📦 Анализ продукта",
-        "team": "👥 Анализ команды",
-        "summary": "🏆 Итоговая оценка"
-    }
-    
-    await callback.message.edit_text(
-        f"✅ **Выбрано:** {block_names.get(block, block)}\n\n"
-        "Отправляй PDF, и я сделаю глубокий анализ именно по этому пункту! 👇",
-        reply_markup=get_back_to_start()
-    )
-    await callback.answer()
+# @dp.callback_query(F.data.startswith("block:"))
+# async def cb_block_select(callback: CallbackQuery):
+#     block = callback.data.split(":")[1]
+#     user_settings[callback.from_user.id]["block"] = block
+#     
+#     block_names = {
+#         "info": "📄 Информация из презентации",
+#         "market": "🌍 Анализ рынка",
+#         "competitors": "⚔️ Анализ конкуренции",
+#         "product": "📦 Анализ продукта",
+#         "team": "👥 Анализ команды",
+#         "summary": "🏆 Итоговая оценка"
+#     }
+#     
+#     await callback.message.edit_text(
+#         f"✅ **Выбрано:** {block_names.get(block, block)}\n\n"
+#         "Отправляй PDF, и я сделаю глубокий анализ именно по этому пункту! 👇",
+#         reply_markup=get_back_to_start()
+#     )
+#     await callback.answer()
 
 
 @dp.callback_query(F.data == "back:start")
@@ -252,11 +304,10 @@ async def cb_feedback(callback: CallbackQuery):
         f"{emoji} Спасибо за фидбек! Я становлюсь лучше благодаря тебе ❤️"
     )
     
-    # Логирование фидбека (можно расширить: слать в админ-чат, писать в БД)
     logger.info(f"Feedback from {callback.from_user.id}: {feedback_type}")
 
 
-# === Запуск ===
+# ================== Запуск ===========================================================================
 
 async def main() -> None:
     logger.info("Starting bot polling...")
