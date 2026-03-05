@@ -10,7 +10,6 @@ from typing import Any, Callable, List, Optional, Tuple
 from dotenv import load_dotenv
 from pathlib import Path
 
-# .env.backend лежит в директории backend, на уровень выше src
 load_dotenv(Path(__file__).resolve().parents[1] / ".env.backend")
 
 
@@ -22,10 +21,11 @@ def _get_api_key() -> str:
 
 def search_web(
     queries: List[str],
-    max_results_per_query: int = 5,
+    max_results_per_query: int = 4,
     log_fn: Optional[Callable[[str], None]] = None,
     return_raw: bool = False,
 ) -> str | Tuple[str, List[dict]]:
+
     """
     Выполняет веб-поиск через Tavily по списку запросов.
 
@@ -134,26 +134,3 @@ def _format_results(results: List[dict], max_total_chars: int = 12000) -> str:
         total_len += len(block)
 
     return "\n".join(parts)
-
-
-def _extract_context(text: str, max_chars: int = 400) -> str:
-    """
-    Вспомогательная функция для построения запросов по тексту (оставлена на будущее).
-    """
-    if not text:
-        return ""
-
-    cleaned = re.sub(r"\[график[^\]]*\]", " ", text, flags=re.I)
-    cleaned = re.sub(r"\[схема[^\]]*\]", " ", cleaned, flags=re.I)
-    cleaned = re.sub(r"\[таблица[^\]]*\]", " ", cleaned, flags=re.I)
-    cleaned = re.sub(r"\[фото[^\]]*\]", " ", cleaned, flags=re.I)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
-
-    lines = [ln.strip() for ln in cleaned.split("\n") if ln.strip()]
-    if lines:
-        first = lines[0]
-        rest = " ".join(lines[1:6])[: max_chars - len(first) - 5]
-        return f"{first} {rest}".strip()[:max_chars]
-
-    return cleaned[:max_chars]
-

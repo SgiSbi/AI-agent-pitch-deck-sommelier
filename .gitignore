@@ -11,7 +11,7 @@ backend/tmp/*
 frontend/.env.frontend
 result
 backend/.env.backend
-backend/__pycache__
+backend/src/__pycache__
 tmp/*
 reports/*
 frontend/.env

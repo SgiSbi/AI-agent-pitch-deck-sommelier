@@ -12,7 +12,7 @@ from aiogram.types import Message, FSInputFile, CallbackQuery
 from aiogram.enums import ChatAction
 from dotenv import load_dotenv
 
-from keyboards import get_start_keyboard, get_block_selector, get_result_keyboard, get_back_to_start
+from keyboards import get_start_keyboard, get_result_keyboard, get_back_to_start
 
 # Настройка логирования
 logging.basicConfig(
