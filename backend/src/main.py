@@ -23,7 +23,7 @@ app = FastAPI(title="Pitch Deck Analyzer API")
 
 def _save_uploaded_pdf(file: UploadFile) -> tuple[Path, str]:
     """
-    Сохраняет загруженный PDF во временный файл и возвращает путь.
+    Сохраняет загруженный PDF во временный файл и возвращает путь + идентификатор презентации.
     """
     if file.content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Ожидается PDF файл.")
@@ -36,7 +36,6 @@ def _save_uploaded_pdf(file: UploadFile) -> tuple[Path, str]:
     if not safe_stem:
         safe_stem = "presentation"
 
-    # Дата в формате ГГГГММДД (GMT+7)
     from datetime import datetime, timedelta, timezone
 
     date_str = datetime.now(timezone(timedelta(hours=7))).strftime("%Y%m%d")
@@ -110,13 +109,7 @@ def stage_qwen_from_pdf(file: UploadFile = File(...)) -> JSONResponse:
 def stage_deepseek_section(body: DeepSeekSectionRequest) -> JSONResponse:
     """
     Этап 3: отправка отдельного модуля в DeepSeek.
-
-    Ожидает на вход:
-    - prompt_filename: имя файла промпта из директории promts (например, '1_info_from_pdf_prompt.md')
-    - qwen_text: текст, извлечённый Qwen из слайдов
-    - presentation_dir: идентификатор директории презентации (для логов и сохранения запросов/ответов)
     """
-    # Используем только шаг DeepSeek, не трогая PDF.
     from .pipeline import send_section_to_deepseek
 
     section_text = send_section_to_deepseek(
@@ -133,6 +126,7 @@ def stage_deepseek_section(body: DeepSeekSectionRequest) -> JSONResponse:
         }
     )
 
+
 @app.post("/debug/markdown-from-pdf")
 def debug_markdown_from_pdf(file: UploadFile = File(...)) -> JSONResponse:
     """
@@ -147,7 +141,7 @@ def debug_markdown_from_pdf(file: UploadFile = File(...)) -> JSONResponse:
         qwen_text=qwen_text,
         presentation_dir=presentation_dir,
     )
-    final_text = run_final_verdict(intermediate_md=intermediate_md)
+    final_text = run_final_verdict(intermediate_md=intermediate_md, presentation_dir=presentation_dir)
     full_md = build_full_markdown(section_texts=section_texts, final_text=final_text)
 
     return JSONResponse(
@@ -163,14 +157,13 @@ def debug_markdown_from_pdf(file: UploadFile = File(...)) -> JSONResponse:
 @app.post("/stage/qwen-image")
 def stage_qwen_image(
     file: UploadFile = File(...),
-    question: str | None = Query(default="Что изображено на этой картинке?", description="Вопрос для анализа изображения"),
+    question: str | None = Query(
+        default="Что изображено на этой картинке?",
+        description="Вопрос для анализа изображения",
+    ),
 ) -> JSONResponse:
     """
     Отправка одного изображения в Qwen (vision) с текстовым вопросом.
-
-    Принимает:
-    - file: изображение (png/jpg) через multipart/form-data
-    - question: опциональный query-параметр с вопросом (по умолчанию: "Что изображено на этой картинке?")
     """
     if file.content_type not in ("image/png", "image/jpeg", "image/jpg"):
         raise HTTPException(status_code=400, detail="Ожидается PNG или JPEG изображение.")
@@ -183,7 +176,7 @@ def stage_qwen_image(
     with image_path.open("wb") as f:
         f.write(file.file.read())
 
-    answer = analyze_image_with_qwen(image_path=image_path, question=question)
+    answer = analyze_image_with_qwen(image_path=image_path, question=question or "")
 
     return JSONResponse(
         {

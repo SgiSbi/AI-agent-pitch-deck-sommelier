@@ -3,7 +3,7 @@ backend/.venv
 backend/tmp/input.pdf
 backend/tmp/slides/*
 backend/tmp/
-backend/result/
+backend/reports/
 backend/tmp/*
 .venv/
 .vscode/
@@ -12,3 +12,5 @@ frontend/.env.frontend
 result
 backend/.env.backend
 backend/__pycache__
+tmp/*
+reports/*

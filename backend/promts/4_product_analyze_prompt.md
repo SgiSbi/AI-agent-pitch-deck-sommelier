@@ -12,6 +12,10 @@ Act as a senior VC analyst specializing in technical due diligence (TDD). You wi
 4. OUTPUTTING all URLs actually used in validation in section 4.5
 
 INPUT FORMAT:
+---WEB-SEARCH-INFORMATION START---
+[Результаты веб-поиска (фрагменты + URL источника). Используй их для валидации утверждений из слайдов.]
+---WEB-SEARCH-INFORMATION END---
+
 ---SLIDES START---
 [raw text from product slides: product description, tech specs, hardware/software stack, development stage, [scheme architecture: ...], [prototype photo: ...], partner mentions]
 ---SLIDES END---

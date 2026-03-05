@@ -12,6 +12,10 @@ Act as a senior VC analyst at a top-tier venture fund. You will receive raw text
 4. OUTPUTTING all URLs actually used in validation in section 2.5
 
 INPUT FORMAT:
+---WEB-SEARCH-INFORMATION START---
+[Результаты веб-поиска (фрагменты + URL источника). Используй их для валидации утверждений из слайдов.]
+---WEB-SEARCH-INFORMATION END---
+
 ---SLIDES START---
 [raw text from market-related slides: TAM/SAM/SOM figures, competitor names, target audience, trends, [график: ...] descriptions]
 ---SLIDES END---

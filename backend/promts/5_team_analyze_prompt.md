@@ -18,6 +18,10 @@ Act as a senior VC analyst specializing in team due diligence and OSINT (Open So
 4. OUTPUTTING all URLs actually used in validation in section 5.5
 
 INPUT FORMAT:
+---WEB-SEARCH-INFORMATION START---
+[Результаты веб-поиска (фрагменты + URL источника). Используй их для валидации утверждений из слайдов.]
+---WEB-SEARCH-INFORMATION END---
+
 ---SLIDES START---
 [raw text from team slides: founder names, roles, experience claims, university affiliations, contacts [email/Telegram], partner mentions, grant references]
 ---SLIDES END---
