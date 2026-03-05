@@ -1,0 +1,6 @@
+tmp/*
+shell.nix
+env_example.md
+result/*
+__pycache__
+Dockerfile
