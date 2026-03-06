@@ -81,7 +81,7 @@ cd ../frontend
 Вернитесь в корневую директорию проекта и запустите контейнеры:
 ```bash
 cd ..
-docker compose up --build -d
+docker compose -f 'docker-compose.yml' up -d --build 
 ```
 
 После запуска приложение будет доступно в вашем телеграмм боте
