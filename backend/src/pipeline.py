@@ -170,7 +170,7 @@ def _parse_tavily_query_plan(text: str) -> Dict[str, List[str]]:
     return result
 
 
-def generate_tavily_queries_stage(qwen_text: str, presentation_dir: str) -> Dict[str, List[str]]:
+def generate_tavily_queries_stage(qwen_text: str, presentation_dir: str, stats: Dict[str, int] | None = None) -> Dict[str, List[str]]:
     """
     Этап 2.5. Генерация поисковых запросов для Tavily через LLM.
     """
@@ -204,6 +204,11 @@ def generate_tavily_queries_stage(qwen_text: str, presentation_dir: str) -> Dict
         prompt_name="tavily_query_plan",
         component="TAVILY:QUERYGEN",
     )
+
+    if stats is not None:
+        usage = resp_json.get("usage") or {}
+        stats["input_tokens"] = stats.get("input_tokens", 0) + int(usage.get("prompt_tokens", 0))
+        stats["output_tokens"] = stats.get("output_tokens", 0) + int(usage.get("completion_tokens", 0))
 
     try:
         content = resp_json["choices"][0]["message"]["content"]
@@ -253,7 +258,7 @@ def extract_slides_stage(pdf_path: Path, presentation_dir: str) -> List[str]:
     return image_paths
 
 
-def qwen_from_slides_stage(image_paths: List[str], presentation_dir: str) -> str:
+def qwen_from_slides_stage(image_paths: List[str], presentation_dir: str, stats: Dict[str, int] | None = None) -> str:
     """
     Этап 2. Один запрос в Qwen: text_extraction.md + изображения слайдов.
     """
@@ -303,7 +308,7 @@ def qwen_from_slides_stage(image_paths: List[str], presentation_dir: str) -> str
 
     chunk_texts_by_idx: Dict[int, str] = {}
 
-    def _process_chunk(idx: int, chunk_paths: List[str]) -> None:
+    def _process_chunk(idx: int, chunk_paths: List[str], run_stats: Dict[str, int] | None) -> None:
         content_items: list[dict] = [{"type": "text", "text": text_extraction_prompt.strip()}]
 
         for img_path in chunk_paths:
@@ -332,6 +337,11 @@ def qwen_from_slides_stage(image_paths: List[str], presentation_dir: str) -> str
 
         resp_json = _post_qwen(payload_wrapper, req_path=req_path, resp_path=resp_path)
 
+        if run_stats is not None:
+            usage = resp_json.get("usage") or {}
+            run_stats["input_tokens"] = run_stats.get("input_tokens", 0) + int(usage.get("prompt_tokens", 0))
+            run_stats["output_tokens"] = run_stats.get("output_tokens", 0) + int(usage.get("completion_tokens", 0))
+
         try:
             chunk_content = resp_json["choices"][0]["message"]["content"]
         except Exception:
@@ -342,7 +352,7 @@ def qwen_from_slides_stage(image_paths: List[str], presentation_dir: str) -> str
 
     with ThreadPoolExecutor(max_workers=len(chunks)) as executor:
         futures = [
-            executor.submit(_process_chunk, idx, chunk_paths)
+            executor.submit(_process_chunk, idx, chunk_paths, stats)
             for idx, chunk_paths in enumerate(chunks, 1)
         ]
         for f in futures:
@@ -366,6 +376,7 @@ def send_section_to_deepseek(
     qwen_text: str,
     presentation_dir: str,
     tavily_queries_by_category: Dict[str, List[str]] | None = None,
+    stats: Dict[str, int] | None = None,
 ) -> str:
     """
     Этап 3. Отправка одной секции в DeepSeek с учётом Tavily поиска.
@@ -429,6 +440,9 @@ def send_section_to_deepseek(
 
             _log("PIPELINE", f"Tavily search start for '{presentation_dir}' section '{prompt_name}'")
             tavily_queries_path.write_text(json.dumps(queries, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            if stats is not None:
+                stats["tavily_requests"] = stats.get("tavily_requests", 0) + 1
 
             log_fn = lambda msg: _log(f"TAVILY:{prompt_name}", msg)
             search_results, raw_responses = search_web(
@@ -538,6 +552,7 @@ def run_deepseek_sections(
     qwen_text: str,
     presentation_dir: str,
     tavily_queries_by_category: Dict[str, List[str]] | None = None,
+    stats: Dict[str, int] | None = None,
 ) -> Tuple[List[str], str]:
     """
     Шаг 3. Пять запросов в DeepSeek по промптам 1-5 (параллельно).
@@ -560,6 +575,7 @@ def run_deepseek_sections(
                 qwen_text=qwen_text,
                 presentation_dir=presentation_dir,
                 tavily_queries_by_category=tavily_queries_by_category,
+                stats=stats,
             ): i
             for i, filename in enumerate(section_prompts_files)
         }
@@ -577,7 +593,7 @@ def run_deepseek_sections(
     return md_parts, intermediate_md
 
 
-def run_final_verdict(intermediate_md: str, presentation_dir: str) -> str:
+def run_final_verdict(intermediate_md: str, presentation_dir: str, stats: Dict[str, int] | None = None) -> str:
     """
     Шаг 4. Финальный запрос в DeepSeek по промпту 6 с добавлением всего markdown.
     """
@@ -609,6 +625,11 @@ def run_final_verdict(intermediate_md: str, presentation_dir: str) -> str:
         prompt_name=prompt_name,
         component="DEEPSEEK",
     )
+
+    if stats is not None:
+        usage = resp_json.get("usage") or {}
+        stats["input_tokens"] = stats.get("input_tokens", 0) + int(usage.get("prompt_tokens", 0))
+        stats["output_tokens"] = stats.get("output_tokens", 0) + int(usage.get("completion_tokens", 0))
 
     try:
         content = resp_json["choices"][0]["message"]["content"]
@@ -657,29 +678,37 @@ def markdown_to_docx(md_path: Path, docx_path: Path) -> None:
     convert_md_to_docx(str(md_path), str(docx_path))
 
 
-def run_full_pipeline(pdf_path: Path, presentation_dir: str) -> Path:
+def run_full_pipeline(pdf_path: Path, presentation_dir: str, user_label: str | None = None) -> Tuple[Path, Dict[str, int]]:
     """
-    Полный пайплайн end-to-end.
+    Полный пайплайн end-to-end. Возвращает (путь к DOCX, статистика: input_tokens, output_tokens, tavily_requests).
     """
     _ensure_dirs()
+
+    stats: Dict[str, int] = {"input_tokens": 0, "output_tokens": 0, "tavily_requests": 0}
+
+    def _log_user(component: str, message: str) -> None:
+        if user_label:
+            _log(component, f"[user={user_label}] {message}")
+        else:
+            _log(component, message)
 
     md_path = TMP_DIR / f"{presentation_dir}.md"
     docx_path = RESULT_DIR / f"{presentation_dir}.docx"
 
-    _log("PIPELINE", f"Start full pipeline for '{presentation_dir}'")
+    _log_user("PIPELINE", f"Start full pipeline for '{presentation_dir}'")
 
     report_dir = REPORT_LOG_ROOT / presentation_dir
     report_dir.mkdir(parents=True, exist_ok=True)
     (report_dir / "sections").mkdir(parents=True, exist_ok=True)
-    _log("REPORTLOG", f"Report log directory: {report_dir}")
+    _log_user("REPORTLOG", f"Report log directory: {report_dir}")
 
     image_paths = extract_slides_stage(pdf_path=pdf_path, presentation_dir=presentation_dir)
 
-    _log("PIPELINE", f"Starting Qwen for '{presentation_dir}' ({len(image_paths)} slides)")
-    qwen_text = qwen_from_slides_stage(image_paths=image_paths, presentation_dir=presentation_dir)
-    _log("PIPELINE", f"Qwen finished for '{presentation_dir}' ({len(qwen_text)} chars)")
+    _log_user("PIPELINE", f"Starting Qwen for '{presentation_dir}' ({len(image_paths)} slides)")
+    qwen_text = qwen_from_slides_stage(image_paths=image_paths, presentation_dir=presentation_dir, stats=stats)
+    _log_user("PIPELINE", f"Qwen finished for '{presentation_dir}' ({len(qwen_text)} chars)")
 
-    tavily_queries_by_category = generate_tavily_queries_stage(qwen_text=qwen_text, presentation_dir=presentation_dir)
+    tavily_queries_by_category = generate_tavily_queries_stage(qwen_text=qwen_text, presentation_dir=presentation_dir, stats=stats)
     try:
         (report_dir / "query_generation_summary.json").write_text(
             json.dumps(
@@ -694,29 +723,33 @@ def run_full_pipeline(pdf_path: Path, presentation_dir: str) -> Path:
             ),
             encoding="utf-8",
         )
-        _log("REPORTLOG", f"Query generation summary saved: {report_dir / 'query_generation_summary.json'}")
+        _log_user(
+            "REPORTLOG",
+            f"Query generation summary saved: {report_dir / 'query_generation_summary.json'}",
+        )
     except Exception as e:
-        _log("REPORTLOG", f"Failed to write query generation summary: {e}")
+        _log_user("REPORTLOG", f"Failed to write query generation summary: {e}")
 
-    _log("PIPELINE", "Starting DeepSeek sections 1-5")
+    _log_user("PIPELINE", "Starting DeepSeek sections 1-5")
     section_texts, intermediate_md = run_deepseek_sections(
         qwen_text=qwen_text,
         presentation_dir=presentation_dir,
         tavily_queries_by_category=tavily_queries_by_category,
+        stats=stats,
     )
 
-    _log("PIPELINE", "Starting final verdict (section 6)")
-    final_text = run_final_verdict(intermediate_md=intermediate_md, presentation_dir=presentation_dir)
+    _log_user("PIPELINE", "Starting final verdict (section 6)")
+    final_text = run_final_verdict(intermediate_md=intermediate_md, presentation_dir=presentation_dir, stats=stats)
 
     full_md = build_full_markdown(section_texts=section_texts, final_text=final_text)
     md_path.write_text(full_md, encoding="utf-8")
-    _log("REPORT", f"Markdown saved to: {md_path} ({len(full_md)} chars)")
+    _log_user("REPORT", f"Markdown saved to: {md_path} ({len(full_md)} chars)")
 
-    _log("REPORT", f"Converting MD to DOCX: {md_path} -> {docx_path}")
+    _log_user("REPORT", f"Converting MD to DOCX: {md_path} -> {docx_path}")
     markdown_to_docx(md_path=md_path, docx_path=docx_path)
     docx_size = docx_path.stat().st_size if docx_path.exists() else 0
-    _log("REPORT", f"DOCX saved to: {docx_path} ({docx_size} bytes)")
-    _log("REPORT", f"Pipeline completed: report ready at {docx_path}")
+    _log_user("REPORT", f"DOCX saved to: {docx_path} ({docx_size} bytes)")
+    _log_user("REPORT", f"Pipeline completed: report ready at {docx_path}")
 
     try:
         section_names = [
@@ -753,5 +786,5 @@ def run_full_pipeline(pdf_path: Path, presentation_dir: str) -> Path:
     except Exception as e:
         _log("REPORTLOG", f"Failed to write unified report log: {e}")
 
-    return docx_path
+    return docx_path, stats
 

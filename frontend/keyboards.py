@@ -1,18 +1,36 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
-
-def get_start_keyboard() -> ReplyKeyboardMarkup:
+def get_start_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    rows = [
+        [KeyboardButton(text="🚀 Начать работу")],
+        [KeyboardButton(text="🔥 FAQ")],
+    ]
+    if is_admin:
+        rows.append([KeyboardButton(text="⚙️ Админ-меню")])
     markup = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🚀 Начать работу")],
-            # [KeyboardButton(text="⚡ Быстро по блоку")],  # Пункт 4: Закомментировано
-            [KeyboardButton(text="🔥 Прожарь полностью")],  # Опционально: если нужна как текстовая
-        ],
+        keyboard=rows,
         resize_keyboard=True,
         one_time_keyboard=False,
         input_field_placeholder="Выберите действие 👇"
     )
     return markup
+
+
+def get_admin_inline_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Список пользователей", callback_data="admin:list")],
+        [InlineKeyboardButton(text="➕ Добавить пользователя", callback_data="admin:add")],
+        [InlineKeyboardButton(text="➖ Удалить пользователя", callback_data="admin:remove")],
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin:stats")],
+        [InlineKeyboardButton(text="↩️ Назад в меню", callback_data="admin:back")],
+    ])
+
+
+def get_admin_back_to_menu_keyboard() -> InlineKeyboardMarkup:
+    """Кнопка «Назад в админ-меню» для подразделов."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="↩️ Назад в админ-меню", callback_data="admin:menu")],
+    ])
 
 # def get_block_selector() -> InlineKeyboardMarkup:
 #     """Выбор конкретного блока для анализа"""
@@ -27,11 +45,12 @@ def get_start_keyboard() -> ReplyKeyboardMarkup:
 #     ])
 
 
-def get_result_keyboard() -> ReplyKeyboardMarkup:
+def get_result_keyboard(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    rows = [[KeyboardButton(text="🔄 Хочу ещё")]]
+    if is_admin:
+        rows.append([KeyboardButton(text="⚙️ Админ-меню")])
     markup = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🔄 Хочу ещё")],
-        ],
+        keyboard=rows,
         resize_keyboard=True,
         one_time_keyboard=False
     )
