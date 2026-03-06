@@ -17,7 +17,7 @@ cd Ai-agent
 Перейдите в папку бэкенда и создайте файл переменных окружения:
 ```bash
 cd backend
-cp .env_example.md .env.backend  # Если есть шаблон, иначе создайте вручную
+cp .env_example.md .env.backend 
 ```
 > Необходимо заполнить `.env.backend` необходимыми данными (api-ключи допступа к LLM, url api-базы, используемые модели, ключ доступа к Tavily).
 > ```env_example.md
