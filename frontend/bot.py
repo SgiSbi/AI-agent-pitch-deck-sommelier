@@ -151,7 +151,7 @@ async def cmd_start(message: Message) -> None:
     if not await _check_not_processing(message):
         return
     await message.answer(
-        "👋 Привет! Я БОТ для генерации аналитических отчётов по Вашим Startup'ам 🤑🤙\n\n"
+        "👋 Привет! Я БОТ для генерации аналитических отчётов по Вашим стартапам 🤑🤙\n\n"
         f"📎 Просто отправь мне PDF-файл c презентацией твоего стартапа (до {MAX_FILE_SIZE / 1024 / 1024:.0f} МБ) и я верну готовый отчёт.\n"
         "⏱ Обработка обычно занимает 5–8 минут, но это того стоит.",
         reply_markup=get_start_keyboard(is_admin=_is_admin(message))
@@ -274,9 +274,9 @@ async def cb_admin_back(callback: CallbackQuery) -> None:
     await callback.message.delete()
     is_admin = get_user_role(callback.from_user.username) == "admin"
     await callback.message.answer(
-        "👋 Привет! Я БОТ для генерации аналитических отчётов по Вашим Startup'ам 🤑🤙\n\n"
-        f"📎 Просто отправь мне PDF-файл c презентацией твоего стартапа (до {MAX_FILE_SIZE / 1024 / 1024:.0f} МБ), и я верну готовый отчёт\n"
-        "⏱ Обработка обычно занимает 5–8 минут, но это того стоит",
+        "👋 Привет! Я БОТ для генерации аналитических отчётов по Вашим стартапам 🤑🤙\n\n"
+        f"📎 Просто отправь мне PDF-файл c презентацией твоего стартапа (до {MAX_FILE_SIZE / 1024 / 1024:.0f} МБ), и я верну готовый отчёт.\n"
+        "⏱ Обработка обычно занимает 5–8 минут, но это того стоит.",
         reply_markup=get_start_keyboard(is_admin=is_admin)
     )
     await callback.answer()
@@ -662,9 +662,9 @@ async def cb_back(callback: CallbackQuery):
     is_admin = get_user_role(callback.from_user.username) == "admin"
     await callback.message.delete()
     await callback.message.answer(
-        "👋 Привет! Я BOT для генерации аналитических отчётов по Вашим Startup'ам 🤑🤙\n\n"
-        f"📎 Просто отправь мне PDF-файл c презентацией твоего стартапа (до {MAX_FILE_SIZE / 1024 / 1024:.0f} МБ), и я верну готовый отчёт\n"
-        "⏱ Обработка обычно занимает 5–8 минут, но это того стоит",
+        "👋 Привет! Я BOT для генерации аналитических отчётов по Вашим стартапам 🤑🤙\n\n"
+        f"📎 Просто отправь мне PDF-файл c презентацией твоего стартапа (до {MAX_FILE_SIZE / 1024 / 1024:.0f} МБ), и я верну готовый отчёт.\n"
+        "⏱ Обработка обычно занимает 5–8 минут, но это того стоит.",
         reply_markup=get_start_keyboard(is_admin=is_admin)
     )
     await callback.answer()

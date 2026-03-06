@@ -10,16 +10,13 @@ services:
     ports:
       - "8000:8000"
 
-frontend:
-  restart: unless-stopped
-  env_file: frontend/.env.frontend
-  build:
-    context: frontend
-    dockerfile: Dockerfile
-  depends_on:
-    - backend
-  volumes:
-    - frontend_whitelist:users_whitelist.json  # или другой путь в контейнере
-
-volumes:
-  frontend_whitelist:
+  frontend:
+    restart: unless-stopped
+    env_file: frontend/.env.frontend
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend/users_whitelist.json:/app/users_whitelist.json
