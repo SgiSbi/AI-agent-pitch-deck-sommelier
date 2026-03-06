@@ -68,7 +68,7 @@ cd ../frontend
     ```bash
     touch users_whitelist.json
     ```
-    *Пример структуры файла (вместо name вставить Telegram Username без @, вместо role admin/standard):*
+    *Пример структуры файла (вместо name вставить Telegram Username без @, вместо поля role вставить admin/standard):*
     ```json
     {
       "users": {
