@@ -1,7 +1,7 @@
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Form
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -56,21 +56,37 @@ class DeepSeekSectionRequest(BaseModel):
 
 
 @app.post("/process-pdf")
-def process_pdf(file: UploadFile = File(...)) -> FileResponse:
+def process_pdf(
+    file: UploadFile = File(...),
+    user_id: str | None = Form(default=None),
+    username: str | None = Form(default=None),
+) -> FileResponse:
     """
     Полный пайплайн: принимает PDF-файл и возвращает DOCX.
     """
     pdf_path, presentation_dir = _save_uploaded_pdf(file)
-    docx_path: Path = run_full_pipeline(pdf_path, presentation_dir)
+
+    user_label_parts: list[str] = []
+    if username:
+        user_label_parts.append(f"@{username}")
+    if user_id:
+        user_label_parts.append(f"id={user_id}")
+    user_label = " ".join(user_label_parts) if user_label_parts else None
+
+    docx_path, stats = run_full_pipeline(pdf_path, presentation_dir, user_label=user_label)
 
     if not docx_path.exists():
         raise HTTPException(status_code=500, detail="Не удалось сгенерировать DOCX.")
 
-    return FileResponse(
+    response = FileResponse(
         path=str(docx_path),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=docx_path.name,
     )
+    response.headers["X-Input-Tokens"] = str(stats.get("input_tokens", 0))
+    response.headers["X-Output-Tokens"] = str(stats.get("output_tokens", 0))
+    response.headers["X-Tavily-Requests"] = str(stats.get("tavily_requests", 0))
+    return response
 
 
 @app.post("/stage/extract-slides")
