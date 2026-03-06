@@ -72,7 +72,7 @@ async def _ensure_access_admin(message: Message) -> bool:
     username = message.from_user.username
     role = get_user_role(username)
     if role != "admin":
-        await message.answer("⛔ У вас нет прав администратора для выполнения этой команды.")
+        await message.answer("⛔ У вас Нет прав! администратора для выполнения этой команды.")
         logger.warning(
             f"Admin access denied for user_id={message.from_user.id}, username={username!r}"
         )
@@ -151,9 +151,9 @@ async def cmd_start(message: Message) -> None:
     if not await _check_not_processing(message):
         return
     await message.answer(
-        "👋 Привет! Я BOT для генерации аналитических отчётов по Вашим Startup'ам 🤑🤙\n\n"
-        f"📎 Просто отправь мне PDF-файл c презентацией твоего стартапа (до {MAX_FILE_SIZE / 1024 / 1024:.0f} МБ), и я верну готовый отчёт\n"
-        "⏱ Обработка обычно занимает 5–8 минут, но это того стоит",
+        "👋 Привет! Я БОТ для генерации аналитических отчётов по Вашим Startup'ам 🤑🤙\n\n"
+        f"📎 Просто отправь мне PDF-файл c презентацией твоего стартапа (до {MAX_FILE_SIZE / 1024 / 1024:.0f} МБ) и я верну готовый отчёт.\n"
+        "⏱ Обработка обычно занимает 5–8 минут, но это того стоит.",
         reply_markup=get_start_keyboard(is_admin=_is_admin(message))
     )
 
@@ -180,11 +180,11 @@ async def handle_faq(message: Message) -> None:
         return
     await message.answer(
         "🧐 <b>Как это работает?</b>\n\n"
-        "1️⃣ Ты кидаешь мне PDF презентацию стартапа\n"
-        "2️⃣ Я отправляю её на мощный сервер с AI\n"
-        "3️⃣ Сервер анализирует всё: рынок, продукт, команду\n"
-        "4️⃣ Я возвращаю тебе готовый DOCX отчёт\n\n"
-        "🔥 Можно выбрать полный прожар или конкретный блок!",
+        "1️⃣ Ты кидаешь мне PDF презентацию стартапа;\n"
+        "2️⃣ Я отправляю её на мощный сервер с AI;\n"
+        "3️⃣ Сервер анализирует всё: рынок, продукт, команду;\n"
+        "4️⃣ Я возвращаю тебе готовый DOCX отчёт.\n\n"
+        "🔥 Готов к полному прожару!",
         reply_markup=get_back_to_start(),
         parse_mode="HTML",
     )
@@ -192,7 +192,7 @@ async def handle_faq(message: Message) -> None:
 
 @dp.message(F.text == "⚙️ Админ-меню")
 async def handle_admin_menu(message: Message) -> None:
-    """Вход в админ-меню (только для админов)."""
+    """Вход в админ-меню (только для админов)"""
     if not await _ensure_access_admin(message):
         return
     if not await _check_not_processing(message):
@@ -212,7 +212,7 @@ async def handle_admin_menu(message: Message) -> None:
 @dp.callback_query(F.data == "admin:list")
 async def cb_admin_list(callback: CallbackQuery) -> None:
     if get_user_role(callback.from_user.username) != "admin":
-        await callback.answer("⛔ Нет прав")
+        await callback.answer("⛔ Нет прав!")
         return
     wl = load_whitelist()
     users = wl["users"]
@@ -234,7 +234,7 @@ async def cb_admin_list(callback: CallbackQuery) -> None:
 @dp.callback_query(F.data == "admin:add")
 async def cb_admin_add(callback: CallbackQuery) -> None:
     if get_user_role(callback.from_user.username) != "admin":
-        await callback.answer("⛔ Нет прав")
+        await callback.answer("⛔ Нет прав!")
         return
     admin_pending[callback.from_user.id] = "add"
     await callback.message.edit_text(
@@ -254,7 +254,7 @@ async def cb_admin_add(callback: CallbackQuery) -> None:
 @dp.callback_query(F.data == "admin:remove")
 async def cb_admin_remove(callback: CallbackQuery) -> None:
     if get_user_role(callback.from_user.username) != "admin":
-        await callback.answer("⛔ Нет прав")
+        await callback.answer("⛔ Нет прав!")
         return
     admin_pending[callback.from_user.id] = "remove"
     await callback.message.edit_text(
@@ -274,7 +274,7 @@ async def cb_admin_back(callback: CallbackQuery) -> None:
     await callback.message.delete()
     is_admin = get_user_role(callback.from_user.username) == "admin"
     await callback.message.answer(
-        "👋 Привет! Я BOT для генерации аналитических отчётов по Вашим Startup'ам 🤑🤙\n\n"
+        "👋 Привет! Я БОТ для генерации аналитических отчётов по Вашим Startup'ам 🤑🤙\n\n"
         f"📎 Просто отправь мне PDF-файл c презентацией твоего стартапа (до {MAX_FILE_SIZE / 1024 / 1024:.0f} МБ), и я верну готовый отчёт\n"
         "⏱ Обработка обычно занимает 5–8 минут, но это того стоит",
         reply_markup=get_start_keyboard(is_admin=is_admin)
@@ -287,7 +287,7 @@ async def cb_admin_menu(callback: CallbackQuery) -> None:
     """Возврат в админ-меню из подраздела (список / добавление / удаление / статистика)."""
     admin_pending.pop(callback.from_user.id, None)
     if get_user_role(callback.from_user.username) != "admin":
-        await callback.answer("⛔ Нет прав")
+        await callback.answer("⛔ Нет прав!")
         return
     await callback.message.edit_text(
         "⚙️ <b>Админ-меню</b>\n\n"
@@ -305,14 +305,14 @@ async def cb_admin_menu(callback: CallbackQuery) -> None:
 @dp.callback_query(F.data == "admin:stats")
 async def cb_admin_stats(callback: CallbackQuery) -> None:
     if get_user_role(callback.from_user.username) != "admin":
-        await callback.answer("⛔ Нет прав")
+        await callback.answer("⛔ Нет прав!")
         return
     lines = ["📊 <b>Статистика по пользователям</b>\n"]
     try:
         stats_map = get_all_stats()
     except Exception as e:
         logger.exception("Failed to load stats: %s", e)
-        await callback.answer("Ошибка загрузки статистики")
+        await callback.answer("Ошибка загрузки статистики.")
         return
     if not stats_map:
         lines.append("Нет пользователей в вайтлисте.")
@@ -407,8 +407,8 @@ async def handle_pdf(message: Message) -> None:
     if document.file_size and document.file_size > MAX_FILE_SIZE:
         processing_users.discard(user_id)
         await message.answer(
-            "🚫 File слишком большой 🍆\n"
-            f"Не отправляй мне files more, чем {MAX_FILE_SIZE / 1024 / 1024:.0f} МБ\n"
+            "🚫 Файл слишком большой 🍆\n"
+            f"Не отправляй мне файлы больше, чем {MAX_FILE_SIZE / 1024 / 1024:.0f} МБ.\n"
             "Заранее спасибо) ❤️‍🩹"
         )
         logger.warning(
@@ -555,12 +555,12 @@ async def handle_pdf(message: Message) -> None:
 @dp.callback_query(F.data == "info:howto")
 async def cb_info_howto(callback: CallbackQuery):
     await callback.message.edit_text(
-        "🧐 **Как это работает?**\n\n"
-        "1️⃣ Ты кидаешь мне PDF презентацию стартапа\n"
-        "2️⃣ Я отправляю её на мощный сервер с AI\n"
-        "3️⃣ Сервер анализирует всё: рынок, продукт, команду\n"
-        "4️⃣ Я возвращаю тебе готовый DOCX отчёт\n\n"
-        "🔥 Можно выбрать полный прожар или конкретный блок!",
+        "🧐 <b>Как это работает?</b>\n\n"
+        "1️⃣ Ты кидаешь мне PDF презентацию стартапа;\n"
+        "2️⃣ Я отправляю её на мощный сервер с AI;\n"
+        "3️⃣ Сервер анализирует всё: рынок, продукт, команду;\n"
+        "4️⃣ Я возвращаю тебе готовый DOCX отчёт.\n\n"
+        "🔥 Готов к полному прожару!",
         reply_markup=get_back_to_start()
     )
     await callback.answer()
