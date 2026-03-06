@@ -18,5 +18,5 @@ services:
       dockerfile: Dockerfile
     depends_on:
       - backend
-    ports:
-      - "3000:3000"
+    volumes:
+      - ./frontend/users_whitelist.json:/app/users_whitelist.json
