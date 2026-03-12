@@ -1,4 +1,16 @@
 services:
+  database:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ai_agent
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
   backend:
     restart: unless-stopped
     env_file: backend/.env.backend
@@ -9,6 +21,8 @@ services:
       - 8000
     ports:
       - "8000:8000"
+    depends_on:
+      - database
 
   frontend:
     restart: unless-stopped
@@ -20,3 +34,6 @@ services:
       - backend
     volumes:
       - ./frontend/users_whitelist.json:/app/users_whitelist.json
+
+volumes:
+  pgdata:
