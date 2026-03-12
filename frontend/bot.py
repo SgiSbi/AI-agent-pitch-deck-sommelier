@@ -8,7 +8,7 @@ from pathlib import Path
 import aiohttp
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command
-from aiogram.types import Message, FSInputFile, CallbackQuery
+from aiogram.types import Message, FSInputFile, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.enums import ChatAction
 from dotenv import load_dotenv
 
@@ -85,13 +85,6 @@ def _is_admin(message: Message) -> bool:
     return get_user_role(message.from_user.username) == "admin"
 
 
-async def _check_not_processing(message: Message) -> bool:
-    """Проверка, что пользователь не в процессе обработки файла"""
-    if message.from_user.id in processing_users:
-        await message.answer("⏳ Пожалуйста, дождитесь окончания обработки предыдущего файла.")
-        return False
-    return True
-
 
 async def _send_to_backend(
     session: aiohttp.ClientSession,
@@ -125,8 +118,11 @@ async def _send_to_backend(
     
     timeout_config = aiohttp.ClientTimeout(total=timeout)
     
+    # Формируем URL для отправки PDF
+    process_url = f"{BACKEND_URL.rstrip('/')}/process-pdf"    
+
     try:
-        async with session.post(BACKEND_URL, data=data, timeout=timeout_config) as resp:
+        async with session.post(process_url, data=data, timeout=timeout_config) as resp:
             if resp.status != 200:
                 text = await resp.text()
                 logger.error(f"Backend error {resp.status}: {text}")
@@ -148,8 +144,6 @@ async def _send_to_backend(
 async def cmd_start(message: Message) -> None:
     if not await _ensure_access_standard(message):
         return
-    if not await _check_not_processing(message):
-        return
     await message.answer(
         "👋 Привет! Я БОТ для генерации аналитических отчётов по Вашим стартапам 🤑🤙\n\n"
         f"📎 Просто отправь мне PDF-файл c презентацией твоего стартапа (до {MAX_FILE_SIZE / 1024 / 1024:.0f} МБ) и я верну готовый отчёт.\n"
@@ -163,8 +157,6 @@ async def handle_want_more(message: Message) -> None:
     """Обработчик повторного запроса после получения отчёта"""
     if not await _ensure_access_standard(message):
         return
-    if not await _check_not_processing(message):
-        return
     await message.answer(
         "📎 Отлично! Отправляй новый PDF-файл с презентацией, и я подготовлю ещё один отчёт 👇",
         reply_markup=get_start_keyboard(is_admin=_is_admin(message))
@@ -175,8 +167,6 @@ async def handle_want_more(message: Message) -> None:
 async def handle_faq(message: Message) -> None:
     """Показ блока «Как это работает?» по нажатию кнопки FAQ."""
     if not await _ensure_access_standard(message):
-        return
-    if not await _check_not_processing(message):  # <<< НОВОЕ
         return
     await message.answer(
         "🧐 <b>Как это работает?</b>\n\n"
@@ -195,14 +185,13 @@ async def handle_admin_menu(message: Message) -> None:
     """Вход в админ-меню (только для админов)"""
     if not await _ensure_access_admin(message):
         return
-    if not await _check_not_processing(message):
-        return
     await message.answer(
         "⚙️ <b>Админ-меню</b>\n\n"
         "📋 <b>Список пользователей</b> — показать всех пользователей и их роли\n"
         "➕ <b>Добавить пользователя</b> — добавить username в вайтлист (standard или admin)\n"
         "➖ <b>Удалить пользователя</b> — удалить username из вайтлиста\n"
-        "📊 <b>Статистика</b> — расход токенов и запросов Tavily по пользователям\n\n"
+        "📊 <b>Статистика</b> — расход токенов и запросов Tavily по пользователям\n"
+        "🗑️ <b>Очистить временные файлы</b> — удалить файлы из tmp и reports\n\n"
         "Выберите действие:",
         reply_markup=get_admin_inline_keyboard(),
         parse_mode="HTML"
@@ -294,7 +283,8 @@ async def cb_admin_menu(callback: CallbackQuery) -> None:
         "📋 <b>Список пользователей</b> — показать всех пользователей и их роли\n"
         "➕ <b>Добавить пользователя</b> — добавить username в вайтлист (standard или admin)\n"
         "➖ <b>Удалить пользователя</b> — удалить username из вайтлиста\n"
-        "📊 <b>Статистика</b> — расход токенов и запросов Tavily по пользователям\n\n"
+        "📊 <b>Статистика</b> — расход токенов и запросов Tavily по пользователям\n"
+        "🗑️ <b>Очистить временные файлы</b> — удалить файлы из tmp и reports\n\n"
         "Выберите действие:",
         parse_mode="HTML",
         reply_markup=get_admin_inline_keyboard(),
@@ -339,6 +329,151 @@ async def cb_admin_stats(callback: CallbackQuery) -> None:
             reply_markup=get_admin_back_to_menu_keyboard(),
         )
     await callback.answer()
+
+
+@dp.callback_query(F.data == "admin:cleanup")
+async def cb_admin_cleanup(callback: CallbackQuery) -> None:
+    """Показ информации о временных файлах с кнопкой подтверждения очистки"""
+    if get_user_role(callback.from_user.username) != "admin":
+        await callback.answer("⛔ Нет прав!")
+        return
+    
+    try:
+        # Получаем размер директории через API
+        # BACKEND_URL может быть вида http://backend:8000/process-pdf
+        # Нужно получить базовый URL: http://backend:8000
+        from urllib.parse import urlparse
+        parsed = urlparse(BACKEND_URL)
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+        size_url = f"{base_url}/tmp/size"
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(size_url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    size_formatted = data.get("size_formatted", "0 B")
+                    files_count = data.get("files_count", 0)
+                    size_bytes = data.get("size_bytes", 0)
+                else:
+                    raise RuntimeError(f"API returned status {resp.status}")
+        
+        # Формируем сообщение с текущим состоянием
+        info_text = (
+            f"🗑️ <b>Очистка временных файлов</b>\n\n"
+            f"📊 Текущее состояние:\n"
+            f"• Файлов: {files_count}\n"
+            f"• Размер: {size_formatted}\n\n"
+        )
+        
+        if files_count == 0:
+            info_text += "✨ Директория уже пуста!"
+            keyboard = get_admin_back_to_menu_keyboard()
+        else:
+            info_text += "⚠️ Будут удалены все временные файлы.\nПродолжить?"
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Да, очистить", callback_data="admin:cleanup_confirm")],
+                [InlineKeyboardButton(text="↩️ Назад в админ-меню", callback_data="admin:menu")],
+            ])
+        
+        await callback.message.edit_text(
+            info_text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+        await callback.answer()
+        
+    except Exception as e:
+        logger.exception(f"Failed to get tmp size: {e}")
+        await callback.message.edit_text(
+            "❌ <b>Ошибка</b>\n\n"
+            f"Не удалось получить информацию о файлах: {str(e)}",
+            parse_mode="HTML",
+            reply_markup=get_admin_back_to_menu_keyboard(),
+        )
+        await callback.answer("❌ Ошибка!")
+
+
+@dp.callback_query(F.data == "admin:cleanup_confirm")
+async def cb_admin_cleanup_confirm(callback: CallbackQuery) -> None:
+    """Выполнение очистки временных файлов"""
+    if get_user_role(callback.from_user.username) != "admin":
+        await callback.answer("⛔ Нет прав!")
+        return
+    
+    try:
+        # Пути к директориям
+        backend_root = Path(__file__).resolve().parent.parent / "backend"
+        tmp_dir = backend_root / "tmp"
+        reports_dir = backend_root / "reports"
+        
+        deleted_count = 0
+        deleted_size = 0
+        errors = []
+        
+        # Очистка tmp (кроме .gitkeep)
+        if tmp_dir.exists():
+            for file_path in tmp_dir.iterdir():
+                if file_path.is_file() and file_path.name != ".gitkeep":
+                    try:
+                        file_size = file_path.stat().st_size
+                        file_path.unlink()
+                        deleted_count += 1
+                        deleted_size += file_size
+                        logger.info(f"Deleted temp file: {file_path.name}")
+                    except Exception as e:
+                        errors.append(f"{file_path.name}: {str(e)}")
+                        logger.error(f"Failed to delete {file_path}: {e}")
+        
+        # Очистка reports (кроме .gitkeep)
+        if reports_dir.exists():
+            for file_path in reports_dir.iterdir():
+                if file_path.is_file() and file_path.name != ".gitkeep":
+                    try:
+                        file_size = file_path.stat().st_size
+                        file_path.unlink()
+                        deleted_count += 1
+                        deleted_size += file_size
+                        logger.info(f"Deleted report file: {file_path.name}")
+                    except Exception as e:
+                        errors.append(f"{file_path.name}: {str(e)}")
+                        logger.error(f"Failed to delete {file_path}: {e}")
+        
+        # Формирование ответа
+        size_mb = deleted_size / (1024 * 1024)
+        result_text = (
+            f"🗑️ <b>Очистка завершена</b>\n\n"
+            f"✅ Удалено файлов: {deleted_count}\n"
+            f"💾 Освобождено места: {size_mb:.2f} МБ"
+        )
+        
+        if errors:
+            result_text += f"\n\n⚠️ Ошибки ({len(errors)}):\n"
+            result_text += "\n".join(f"• {err}" for err in errors[:5])
+            if len(errors) > 5:
+                result_text += f"\n• ... и ещё {len(errors) - 5}"
+        
+        await callback.message.edit_text(
+            result_text,
+            parse_mode="HTML",
+            reply_markup=get_admin_back_to_menu_keyboard(),
+        )
+        await callback.answer("✅ Очистка выполнена!")
+        
+        logger.info(
+            f"Cleanup completed by @{callback.from_user.username}: "
+            f"{deleted_count} files, {size_mb:.2f} MB"
+        )
+        
+    except Exception as e:
+        logger.exception(f"Cleanup failed: {e}")
+        await callback.message.edit_text(
+            "❌ <b>Ошибка при очистке</b>\n\n"
+            f"Не удалось выполнить очистку: {str(e)}",
+            parse_mode="HTML",
+            reply_markup=get_admin_back_to_menu_keyboard(),
+        )
+        await callback.answer("❌ Ошибка!")
+
 
 
 @dp.message(F.text, lambda m: m.from_user.id in admin_pending)
@@ -584,8 +719,6 @@ async def cmd_users_list(message: Message) -> None:
     """Показать список пользователей и их ролей (admin only)."""
     if not await _ensure_access_admin(message):
         return
-    if not await _check_not_processing(message):
-        return
 
     wl = load_whitelist()
     users = wl["users"]
@@ -607,8 +740,6 @@ async def cmd_user_add(message: Message) -> None:
     role: standard | admin (по умолчанию standard)
     """
     if not await _ensure_access_admin(message):
-        return
-    if not await _check_not_processing(message):
         return
 
     parts = (message.text or "").split()
@@ -636,8 +767,6 @@ async def cmd_user_remove(message: Message) -> None:
     Формат: /user_remove username
     """
     if not await _ensure_access_admin(message):
-        return
-    if not await _check_not_processing(message):
         return
 
     parts = (message.text or "").split()
@@ -704,8 +833,6 @@ async def cmd_cheatcode(message: Message) -> None:
 async def handle_unknown_command(message: Message) -> None:
     """Обработчик неизвестных команд"""
     if not await _ensure_access_standard(message):
-        return
-    if not await _check_not_processing(message):
         return
     await message.answer(
         "❓ Неизвестная команда. Используйте /start для начала работы или отправьте PDF-файл."
