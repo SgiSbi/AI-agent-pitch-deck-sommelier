@@ -202,3 +202,122 @@ def stage_qwen_image(
         }
     )
 
+
+
+def _get_directory_size(path: Path) -> int:
+    """
+    Рекурсивно вычисляет размер директории в байтах.
+    """
+    total_size = 0
+    try:
+        for item in path.rglob("*"):
+            if item.is_file():
+                try:
+                    total_size += item.stat().st_size
+                except (OSError, PermissionError):
+                    pass
+    except (OSError, PermissionError):
+        pass
+    return total_size
+
+
+def _format_size(size_bytes: int) -> str:
+    """
+    Форматирует размер в человекочитаемый формат.
+    """
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
+        if size_bytes < 1024.0:
+            return f"{size_bytes:.2f} {unit}"
+        size_bytes /= 1024.0
+    return f"{size_bytes:.2f} PB"
+
+
+@app.get("/tmp/size")
+def get_tmp_size() -> JSONResponse:
+    """
+    Возвращает текущий размер директории /backend/tmp/*.
+    """
+    if not TMP_DIR.exists():
+        return JSONResponse(
+            {
+                "size_bytes": 0,
+                "size_formatted": "0 B",
+                "files_count": 0,
+                "message": "Директория tmp не существует",
+            }
+        )
+
+    size_bytes = _get_directory_size(TMP_DIR)
+    files_count = sum(1 for _ in TMP_DIR.rglob("*") if _.is_file())
+
+    return JSONResponse(
+        {
+            "size_bytes": size_bytes,
+            "size_formatted": _format_size(size_bytes),
+            "files_count": files_count,
+            "path": str(TMP_DIR),
+        }
+    )
+
+
+@app.delete("/tmp/cleanup")
+def cleanup_tmp_directory() -> JSONResponse:
+    """
+    Очищает директорию /backend/tmp/*, удаляя все файлы и поддиректории.
+    Сохраняет только .gitkeep файл, если он существует.
+    """
+    if not TMP_DIR.exists():
+        return JSONResponse(
+            {
+                "success": True,
+                "message": "Директория tmp не существует",
+                "deleted_files": 0,
+                "freed_bytes": 0,
+                "freed_formatted": "0 B",
+            }
+        )
+
+    # Получаем размер до очистки
+    size_before = _get_directory_size(TMP_DIR)
+    files_count = 0
+
+    import shutil
+
+    try:
+        # Удаляем все содержимое, кроме .gitkeep
+        for item in TMP_DIR.iterdir():
+            if item.name == ".gitkeep":
+                continue
+
+            try:
+                if item.is_file():
+                    item.unlink()
+                    files_count += 1
+                elif item.is_dir():
+                    shutil.rmtree(item)
+                    files_count += 1
+            except (OSError, PermissionError) as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Ошибка при удалении {item.name}: {str(e)}",
+                )
+
+        size_after = _get_directory_size(TMP_DIR)
+        freed_bytes = size_before - size_after
+
+        return JSONResponse(
+            {
+                "success": True,
+                "message": "Директория tmp успешно очищена",
+                "deleted_items": files_count,
+                "freed_bytes": freed_bytes,
+                "freed_formatted": _format_size(freed_bytes),
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при очистке директории: {str(e)}",
+        )
+

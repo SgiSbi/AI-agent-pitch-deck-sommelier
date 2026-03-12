@@ -7,11 +7,9 @@ backend/reports/
 backend/tmp/*
 .venv/
 .vscode/
-.env
 frontend/.env.frontend
-result
 backend/.env.backend
-backend/src/__pycache__
+backend/src/__pycache__/
 tmp/*
 reports/*
 frontend/.env
