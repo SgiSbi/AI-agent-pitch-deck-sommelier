@@ -18,3 +18,5 @@ __pycache__
 backend/src/__pycache__/*
 frontend/src/__pycache__
 frontend/users_whitelist.json
+.kiro
+.env

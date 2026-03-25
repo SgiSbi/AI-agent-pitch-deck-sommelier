@@ -8,7 +8,7 @@ WORKDIR /backend
 COPY . /backend
 
 # Устанавливаем зависимости
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --default-timeout=100 -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
 
 EXPOSE 8000
 
