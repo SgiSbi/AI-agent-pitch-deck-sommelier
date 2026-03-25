@@ -7,17 +7,24 @@ from .db_config import ASYNC_DATABASE_URL
 
 
 class Base(DeclarativeBase):
-    """Базовый класс для ORM-моделей."""
+    pass
 
 
-async_engine = create_async_engine(ASYNC_DATABASE_URL, future=True)
+async_engine = create_async_engine(
+    ASYNC_DATABASE_URL,
+    future=True,
+    pool_pre_ping=True,       # проверяет соединение перед использованием
+    pool_recycle=1800,         # пересоздаёт соединения старше 30 минут
+    pool_size=5,
+    max_overflow=10,
+)
 AsyncSessionLocal = async_sessionmaker(bind=async_engine, expire_on_commit=False)
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Зависимость FastAPI: выдаёт AsyncSession и закрывает её после запроса.
-    """
     async with AsyncSessionLocal() as session:
-        yield session
-
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise

@@ -8,10 +8,15 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import requests
+from requests.exceptions import ConnectionError as RequestsConnectionError, Timeout, HTTPError
 from dotenv import load_dotenv
 
 from .interfaces import ILLMClient
 from .logging_impl import default_logger
+
+
+class LLMConnectionError(RuntimeError):
+    """Ошибка соединения с LLM-провайдером (routerai и т.п.)."""
 
 
 # .env.backend лежит в директории backend, на уровень выше src
@@ -70,8 +75,14 @@ def _post_chat_completion(
 
     url = base_url.rstrip("/") + "/chat/completions"
 
-    resp = requests.post(url, json=payload, headers=headers, timeout=300)
-    resp.raise_for_status()
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=300)
+        resp.raise_for_status()
+    except (RequestsConnectionError, Timeout) as e:
+        raise LLMConnectionError(f"Нет соединения с LLM-провайдером ({url}): {e}") from e
+    except HTTPError as e:
+        raise LLMConnectionError(f"LLM-провайдер вернул ошибку {e.response.status_code}: {e}") from e
+
     data = resp.json()
 
     try:
@@ -175,8 +186,13 @@ class DefaultLLMClient(ILLMClient):
         }
 
         url = config.qwen_api_base.rstrip("/") + "/chat/completions"
-        resp = requests.post(url, json=payload, headers=headers, timeout=300)
-        resp.raise_for_status()
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=300)
+            resp.raise_for_status()
+        except (RequestsConnectionError, Timeout) as e:
+            raise LLMConnectionError(f"Нет соединения с LLM-провайдером ({url}): {e}") from e
+        except HTTPError as e:
+            raise LLMConnectionError(f"LLM-провайдер вернул ошибку {e.response.status_code}: {e}") from e
 
         data = resp.json()
         try:
@@ -252,6 +268,10 @@ class DefaultLLMClient(ILLMClient):
                     continue
                 break
 
+        if isinstance(last_err, (RequestsConnectionError, Timeout)):
+            raise LLMConnectionError(
+                f"Нет соединения с LLM-провайдером после {max_retries} попыток"
+            ) from last_err
         raise RuntimeError(f"DeepSeek request failed for '{prompt_name}' after retries") from last_err
 
 
@@ -261,7 +281,8 @@ class DefaultLLMClient(ILLMClient):
     def extract_information_from_images(
         self, 
         image_paths: List[str], 
-        presentation_dir: str
+        presentation_dir: str,
+        stats: Optional[Dict[str, int]] = None,
     ) -> str:
         """
         Извлечение текстовой информации из слайдов презентации через Qwen vision API.
@@ -345,7 +366,13 @@ class DefaultLLMClient(ILLMClient):
             # Сохранение ответа
             resp_path.write_text(json.dumps(resp_json, ensure_ascii=False, indent=2), encoding="utf-8")
             default_logger.log("QWEN", f"Response saved to: {resp_path}")
-            
+
+            # Обновление статистики токенов
+            if stats is not None:
+                usage = resp_json.get("usage", {})
+                stats["input_tokens"] = stats.get("input_tokens", 0) + int(usage.get("prompt_tokens", 0))
+                stats["output_tokens"] = stats.get("output_tokens", 0) + int(usage.get("completion_tokens", 0))
+
             content = resp_json["choices"][0]["message"]["content"]
             if not isinstance(content, str):
                 raise TypeError(f"Qwen content is not a string: {type(content)}")
@@ -546,9 +573,15 @@ class DefaultLLMClient(ILLMClient):
             prompt_name=prompt_name,
             component="DEEPSEEK"
         )
-        
+
+        # Обновление статистики токенов
+        if stats is not None:
+            usage = resp_json.get("usage", {})
+            stats["input_tokens"] = stats.get("input_tokens", 0) + int(usage.get("prompt_tokens", 0))
+            stats["output_tokens"] = stats.get("output_tokens", 0) + int(usage.get("completion_tokens", 0))
+
         content = resp_json["choices"][0]["message"]["content"]
-        
+
         # Сохранение лога секции
         self._save_section_log(
             presentation_dir=presentation_dir,
@@ -754,7 +787,7 @@ class DefaultLLMClient(ILLMClient):
         tavily_queries_path.write_text(json.dumps(queries, ensure_ascii=False, indent=2), encoding="utf-8")
         
         if stats is not None:
-            stats["tavily_requests"] = stats.get("tavily_requests", 0) + 1
+            stats["tavily_requests"] = stats.get("tavily_requests", 0) + len(queries)
         
         # Выполнение поиска
         log_fn = lambda msg: default_logger.log(f"TAVILY:{prompt_name}", msg)

@@ -1,22 +1,3 @@
-"""
-Конфигурация подключения к базе данных.
-
-Поддерживаются два варианта настройки:
-1) Готовая строка подключения в переменной окружения DATABASE_URL.
-2) Набор переменных:
-   - DBUSER
-   - DBPASSWORD
-   - DBHOST
-   - DBPORT
-   - DBNAME
-   (аналогично примеру из .env.dev)
-
-Для надёжной работы текущей синхронной ORM‑логики используется
-синхронный драйвер (psycopg2), поскольку async‑драйвер asyncpg
-требует полноценного перехода на AsyncSession и await‑вызовы,
-иначе возникает ошибка MissingGreenlet.
-"""
-
 import os
 from dotenv import load_dotenv
 from pathlib import Path

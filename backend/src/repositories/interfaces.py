@@ -1,10 +1,3 @@
-"""
-Интерфейсы (Protocol) для слоя репозиториев.
-
-Здесь описываются контракты взаимодействия с хранилищами данных (БД и т.п.).
-Конкретные реализации могут работать с Postgres, файлами, Redis и т.д.
-"""
-
 from __future__ import annotations
 
 from typing import Protocol, runtime_checkable, Dict, Any, Optional
@@ -12,60 +5,23 @@ from typing import Protocol, runtime_checkable, Dict, Any, Optional
 
 @runtime_checkable
 class UserStatsRepository(Protocol):
-    """
-    Репозиторий для хранения статистики использования пайплайна пользователями.
-
-    Возможные реализации:
-    - БД (Postgres, SQLite и т.п.)
-    - внешнее хранилище метрик
-    - файловое хранилище
-    """
-
-    def add_run_stats(self, username: Optional[str], stats: Dict[str, int]) -> None:
-        """
-        Сохранить агрегированную статистику одного запуска пайплайна.
-
-        :param username: Telegram username пользователя (или None, если неизвестен).
-        :param stats: Словарь с ключами вроде "input_tokens", "output_tokens",
-                      "tavily_requests" и их значениями.
-        """
-        ...
+    def add_run_stats(self, username: Optional[str], stats: Dict[str, int]) -> None: ...
+    def add_token_stats(self, user_id: int, input_tokens: int, output_tokens: int, tavily_requests: int) -> None: ...
 
 
 @runtime_checkable
 class PresentationReportRepository(Protocol):
-    """
-    Репозиторий для хранения артефактов отчёта (PDF, MD, DOCX и служебные JSON).
-    Сейчас пайплайн пишет их в файловую систему; этот интерфейс нужен для
-    будущего переноса в БД или объектное хранилище.
-    """
-
-    def save_paths_summary(self, presentation_dir: str, summary: Dict[str, Any]) -> None:
-        """
-        Сохранить сводную информацию по отчёту (пути к файлам, размеры и т.п.).
-        """
-        ...
+    def save_paths_summary(self, presentation_dir: str, summary: Dict[str, Any]) -> None: ...
 
 
 @runtime_checkable
 class UserRepository(Protocol):
-    """
-    Репозиторий пользователей.
-    """
-
-    def get_or_create(self, telegram_id: int, username: Optional[str]) -> Any:
-        """
-        Найти пользователя по telegram_id или создать нового.
-        """
-        ...
+    def get_by_login(self, login: str) -> Any: ...
+    def create(self, login: str, hashed_password: str) -> Any: ...
 
 
 @runtime_checkable
 class ReportRepository(Protocol):
-    """
-    Репозиторий отчётов.
-    """
-
     def create_report(
         self,
         presentation_dir: str,
@@ -73,8 +29,7 @@ class ReportRepository(Protocol):
         pdf_path: Optional[str],
         docx_path: Optional[str],
         report_log_path: Optional[str],
-    ) -> Any:
-        """
-        Создать запись об отчёте.
-        """
-        ...
+        input_tokens: int,
+        output_tokens: int,
+        tavily_requests: int,
+    ) -> Any: ...

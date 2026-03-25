@@ -3,24 +3,31 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .session import Base
 
 
 class User(Base):
-    """Пользователь Telegram, расширяемый для платёжной системы."""
+    """Пользователь системы с логином и паролем."""
 
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
-    username: Mapped[Optional[str]] = mapped_column(String(255), index=True, nullable=True)
+    login: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    # Для будущей биллинговой системы
     role: Mapped[str] = mapped_column(String(32), default="standard")
     plan: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    is_whitelisted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Накопленная статистика токенов
+    total_input_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    total_output_tokens: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
+    total_tavily_requests: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -54,13 +61,16 @@ class Report(Base):
     )
     user: Mapped[Optional[User]] = relationship("User", back_populates="reports")
 
-    # Пути к файлам / логам. Пока храним как строки, дальше можно вынести в S3 и т.п.
     pdf_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     docx_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     report_log_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Статистика по конкретному отчёту
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    tavily_requests: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
     )
-

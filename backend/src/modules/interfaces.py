@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Protocol, runtime_checkable, Any, List, Tuple, Dict, Optional
+from typing import Protocol, runtime_checkable, List, Tuple, Dict, Optional
 
 
 @runtime_checkable
@@ -10,7 +10,7 @@ class ILogger(Protocol):
     Интерфейс логирования событий пайплайна и сервисов.
     """
 
-    def log(self, component: str, message: str) -> None:
+    def log(self, component: str, message: str, user_label: Optional[str] = None) -> None:
         ...
 
 
