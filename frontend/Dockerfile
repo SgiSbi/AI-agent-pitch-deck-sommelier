@@ -1,14 +1,17 @@
-# Используем официальный образ с Python
-FROM python:3.12-slim
+# Используем официальный образ Node.js
+FROM node:18-alpine
 
 # Устанавливаем рабочую директорию внутри контейнера
 WORKDIR /app
 
-# Копируем все файлы в контейнер
-COPY . /app
+# Копируем package.json и package-lock.json
+COPY package*.json ./
 
 # Устанавливаем зависимости
-RUN pip install --no-cache-dir -r requirements.txt
+RUN npm install --production
+
+# Копируем остальные файлы в контейнер
+COPY . /app
 
 # Указываем команду для запуска приложения
-CMD ["python", "bot.py"]
+CMD ["npm", "start"]
