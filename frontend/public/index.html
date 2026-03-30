@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pitch Deck Analyzer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Login Screen -->
+    <div id="login-screen" class="screen active">
+      <div class="login-container">
+        <div class="login-box">
+          <h1>Pitch Deck Analyzer</h1>
+          <p class="subtitle">Быстрый AI‑анализ презентаций</p>
+
+          <form id="login-form" onsubmit="handleLogin(event)">
+            <div class="form-group">
+              <input
+                type="text"
+                id="username"
+                placeholder="Логин"
+                required
+                autocomplete="username"
+              />
+            </div>
+            <div class="form-group">
+              <input
+                type="password"
+                id="password"
+                placeholder="Пароль"
+                required
+                autocomplete="current-password"
+              />
+            </div>
+            <button type="submit" class="btn btn-primary btn-large">Войти</button>
+          </form>
+
+          <div id="login-error" class="error hidden"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Screen -->
+    <div id="main-screen" class="screen">
+      <header class="header">
+        <div class="container header-row">
+          <h1>Pitch Deck Analyzer</h1>
+          <div class="user-info">
+            <span id="user-display"></span>
+            <button id="logout-btn" class="btn btn-outline btn-small">Выход</button>
+          </div>
+        </div>
+      </header>
+
+      <main class="main-content">
+        <div class="container">
+          <section class="card">
+            <h2>Загрузите PDF</h2>
+            
+
+            <div class="upload-area" id="upload-area">
+              <p class="upload-text">Перетащите файл или нажмите, чтобы выбрать</p>
+              <input type="file" id="file-input" accept=".pdf" hidden />
+            </div>
+
+            <div id="upload-info" class="info-box hidden"><p id="file-info"></p></div>
+
+            <button id="upload-btn" class="btn btn-primary btn-large hidden" onclick="handleUpload()">Анализ</button>
+            <div id="upload-error" class="error hidden"></div>
+          </section>
+
+          <section id="processing-section" class="card processing-section hidden">
+            <div class="processing-box">
+              <div class="spinner"></div>
+              <h3>Анализируем презентацию</h3>
+              <p>Это займет примерно 5–8 минут. Пожалуйста, не закрывайте страницу.</p>
+              <div class="progress-bar"><div class="progress-fill"></div></div>
+            </div>
+          </section>
+
+          <section id="results-section" class="card results-section hidden">
+            <div class="results-box success">
+              <h3>✅ Готово!</h3>
+              <p>Ваш аналитический отчет был успешно создан</p>
+              <div class="stats">
+                <div class="stat"><span class="stat-label">Обработано токенов:</span><span id="stat-tokens" class="stat-value">-</span></div>
+                <div class="stat"><span class="stat-label">Веб-поисков:</span><span id="stat-searches" class="stat-value">-</span></div>
+              </div>
+              <div class="actions">
+                <button id="download-btn" class="btn btn-primary btn-large">⬇ Скачать отчет (DOCX)</button>
+                <button id="upload-again-btn" class="btn btn-secondary" onclick="resetForm()">🔄 Загрузить еще</button>
+              </div>
+            </div>
+
+            <div id="error-section" class="results-box error-result hidden">
+              <h3>❌ Ошибка при обработке</h3>
+              <p id="error-message"></p>
+              <button class="btn btn-secondary" onclick="resetForm()">🔄 Попробовать снова</button>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
