@@ -3,7 +3,8 @@
 ## Требования
 
 - Python 3.12+
-- PostgreSQL 15+ (запущенный локально или через Docker)
+- Node.js 18+
+- PostgreSQL 15+ (локально или через Docker)
 - Git
 
 ## 1. Клонирование репозитория
@@ -24,7 +25,7 @@ CREATE DATABASE ai_agent;
 Или поднимите только контейнер с БД:
 
 ```bash
-docker-compose up -d database
+docker compose up -d database
 ```
 
 ## 3. Backend
@@ -64,6 +65,12 @@ RESET_DB=False
 
 SECRET_KEY=<случайная-строка-минимум-32-символа>
 ACCESS_TOKEN_EXPIRE_MINUTES=60
+
+CORS_ORIGINS=http://localhost:3000
+
+# Опционально: автосоздание администратора при старте
+ADMIN_LOGIN=admin
+ADMIN_PASSWORD=<пароль>
 ```
 
 Запуск:
@@ -73,23 +80,45 @@ ACCESS_TOKEN_EXPIRE_MINUTES=60
 uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Swagger UI доступен по адресу: `http://localhost:8000/docs`
+Swagger UI: `http://localhost:8000/docs`
 
-## 4. Первый администратор
-
-После первого запуска зарегистрируйте пользователя через API и назначьте ему роль admin напрямую в БД:
+## 4. Frontend
 
 ```bash
-# Регистрация
-curl -X POST http://localhost:8000/users/register \
-  -H "Content-Type: application/json" \
-  -d '{"login": "admin", "password": "yourpassword"}'
-
-# Назначение роли (psql или любой GUI)
-UPDATE users SET role = 'admin' WHERE login = 'admin';
+cd frontend
+npm install
 ```
 
-## 5. Переменные окружения — описание
+Создайте файл `frontend/.env.frontend` по образцу `frontend/env_example.md`:
+
+```env
+BACKEND_URL=http://localhost:8000
+PUBLIC_BACKEND_URL=http://localhost:8000
+PORT=3000
+BACKEND_TIMEOUT=600000
+```
+
+Запуск:
+
+```bash
+node app.js
+```
+
+Фронтенд доступен по адресу: `http://localhost:3000`
+
+## 5. Первый администратор
+
+Если `ADMIN_LOGIN` и `ADMIN_PASSWORD` заданы в `.env.backend`, администратор создаётся автоматически при первом старте бекенда.
+
+Альтернативно — через SQL:
+
+```sql
+UPDATE users SET role = 'admin', is_whitelisted = true WHERE login = 'yourlogin';
+```
+
+## 6. Переменные окружения — описание
+
+### backend/.env.backend
 
 | Переменная | Описание |
 |---|---|
@@ -109,3 +138,15 @@ UPDATE users SET role = 'admin' WHERE login = 'admin';
 | `RESET_DB` | `True` — пересоздать таблицы при старте |
 | `SECRET_KEY` | Секрет для подписи JWT-токенов |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Время жизни токена в минутах |
+| `CORS_ORIGINS` | Разрешённые origins через запятую |
+| `ADMIN_LOGIN` | Логин первого администратора |
+| `ADMIN_PASSWORD` | Пароль первого администратора |
+
+### frontend/.env.frontend
+
+| Переменная | Описание |
+|---|---|
+| `BACKEND_URL` | Внутренний адрес бекенда (для Node.js-сервера) |
+| `PUBLIC_BACKEND_URL` | Публичный адрес бекенда (для браузера) |
+| `PORT` | Порт Node.js-сервера (по умолчанию 3000) |
+| `BACKEND_TIMEOUT` | Таймаут запросов к бекенду в мс (по умолчанию 600000) |

@@ -29,6 +29,18 @@ async def _enrich(user: User, db: AsyncSession) -> UserAdminRead:
     return data
 
 
+async def _get_target_non_admin(user_id: int, admin: User, repo: SqlAlchemyUserRepository) -> User:
+    """Возвращает пользователя, запрещая действия над другими админами и собой."""
+    user = await repo.get_by_id(user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    if user.id == admin.id:
+        raise HTTPException(status_code=400, detail="Нельзя изменять самого себя")
+    if user.role == "admin":
+        raise HTTPException(status_code=403, detail="Нельзя изменять другого администратора")
+    return user
+
+
 @router.get("/users", response_model=List[UserAdminRead])
 async def list_users(
     db: AsyncSession = Depends(get_db),
@@ -61,12 +73,9 @@ async def block_user(
     admin: User = Depends(require_admin),
 ) -> UserRead:
     """Заблокировать пользователя."""
-    if user_id == admin.id:
-        raise HTTPException(status_code=400, detail="Нельзя заблокировать самого себя")
     repo = SqlAlchemyUserRepository(db)
+    await _get_target_non_admin(user_id, admin, repo)
     user = await repo.set_active(user_id, is_active=False)
-    if user is None:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
     return UserRead.model_validate(user)
 
 
@@ -74,13 +83,12 @@ async def block_user(
 async def unblock_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
 ) -> UserRead:
     """Разблокировать пользователя."""
     repo = SqlAlchemyUserRepository(db)
+    await _get_target_non_admin(user_id, admin, repo)
     user = await repo.set_active(user_id, is_active=True)
-    if user is None:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
     return UserRead.model_validate(user)
 
 
@@ -88,13 +96,12 @@ async def unblock_user(
 async def add_to_whitelist(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
 ) -> UserRead:
     """Добавить пользователя в вайтлист."""
     repo = SqlAlchemyUserRepository(db)
+    await _get_target_non_admin(user_id, admin, repo)
     user = await repo.set_whitelisted(user_id, is_whitelisted=True)
-    if user is None:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
     return UserRead.model_validate(user)
 
 
@@ -102,13 +109,12 @@ async def add_to_whitelist(
 async def remove_from_whitelist(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
 ) -> UserRead:
     """Убрать пользователя из вайтлиста."""
     repo = SqlAlchemyUserRepository(db)
+    await _get_target_non_admin(user_id, admin, repo)
     user = await repo.set_whitelisted(user_id, is_whitelisted=False)
-    if user is None:
-        raise HTTPException(status_code=404, detail="Пользователь не найден")
     return UserRead.model_validate(user)
 
 

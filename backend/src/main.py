@@ -1,6 +1,7 @@
 import os
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 
 from .routes import users, debug, pipeline, admin
@@ -10,6 +11,19 @@ from .modules.security import hash_password
 
 
 app = FastAPI(title="Pitch Deck Analyzer API")
+
+_cors_origins = os.getenv("CORS_ORIGINS", "").split(",")
+_cors_origins = [o.strip() for o in _cors_origins if o.strip()]
+if not _cors_origins:
+    _cors_origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(pipeline.router)
 app.include_router(users.router)

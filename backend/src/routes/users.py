@@ -12,7 +12,7 @@ from ..modules.deps import get_current_user
 from ..modules.security import hash_password, verify_password, create_access_token
 from ..repositories.sqlalchemy_repos import SqlAlchemyUserRepository, SqlAlchemyReportRepository
 from ..schemas.report import ReportRead
-from ..schemas.user import UserRegister, UserLogin, UserRead, TokenResponse
+from ..schemas.user import UserRegister, UserLogin, UserRead, UserProfileRead, TokenResponse
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -62,10 +62,10 @@ async def login_form(
     return TokenResponse(access_token=create_access_token(subject=user.login))
 
 
-@router.get("/me", response_model=UserRead)
-async def get_me(current_user: User = Depends(get_current_user)) -> UserRead:
+@router.get("/me", response_model=UserProfileRead)
+async def get_me(current_user: User = Depends(get_current_user)) -> UserProfileRead:
     """Информация о текущем авторизованном пользователе."""
-    return UserRead.model_validate(current_user)
+    return UserProfileRead.model_validate(current_user)
 
 
 @router.get("/me/reports", response_model=List[ReportRead])

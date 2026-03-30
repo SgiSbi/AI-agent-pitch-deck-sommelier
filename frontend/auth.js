@@ -15,7 +15,11 @@ async function login(req, res) {
   try {
     const response = await axios.post(`${BACKEND_URL}/users/login`, { login, password });
     const { access_token } = response.data;
-    res.json({ success: true, access_token, login });
+    // Fetch user profile to get role and other fields
+    const meResponse = await axios.get(`${BACKEND_URL}/users/me`, {
+      headers: { Authorization: `Bearer ${access_token}` },
+    });
+    res.json({ success: true, access_token, ...meResponse.data });
   } catch (error) {
     const status = error.response?.status || 503;
     const detail = error.response?.data?.detail || 'Auth service unavailable';

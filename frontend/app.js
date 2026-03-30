@@ -39,8 +39,81 @@ app.get('/api/backend-health', async (_req, res) => {
 app.post('/api/auth/login', authMiddleware.login);
 app.post('/api/auth/logout', (_req, res) => res.json({ success: true }));
 app.get('/api/auth/check', authMiddleware.checkAuth, (req, res) => {
-  res.json({ authenticated: true, login: req.user.login });
+  res.json({ authenticated: true, login: req.user.login, role: req.user.role });
 });
+
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const response = await axios.post(`${BACKEND_URL}/users/register`, req.body);
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 503;
+    const detail = error.response?.data?.detail || error.message;
+    res.status(status).json({ error: detail });
+  }
+});
+
+// Generic backend proxy (authenticated)
+async function proxyToBackend(req, res, { method, backendPath, body = null }) {
+  try {
+    const response = await axios({
+      method,
+      url: `${BACKEND_URL}${backendPath}`,
+      headers: { Authorization: `Bearer ${req.token}` },
+      data: body,
+      timeout: 30000,
+    });
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 503;
+    const detail = error.response?.data?.detail || error.response?.data?.error || error.message;
+    res.status(status).json({ error: detail });
+  }
+}
+
+// User profile & reports
+app.get('/api/users/me', authMiddleware.checkAuth, (req, res) =>
+  proxyToBackend(req, res, { method: 'GET', backendPath: '/users/me' }));
+
+app.get('/api/users/me/reports', authMiddleware.checkAuth, (req, res) =>
+  proxyToBackend(req, res, { method: 'GET', backendPath: '/users/me/reports' }));
+
+// Report download
+app.get('/api/pipeline/reports/:id/download', authMiddleware.checkAuth, async (req, res) => {
+  try {
+    const response = await axios.get(
+      `${BACKEND_URL}/pipeline/reports/${req.params.id}/download`,
+      { headers: { Authorization: `Bearer ${req.token}` }, responseType: 'arraybuffer', timeout: 30000 }
+    );
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', response.headers['content-disposition'] || 'attachment; filename="report.docx"');
+    res.send(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 503).json({ error: error.response?.data?.detail || error.message });
+  }
+});
+
+// Admin routes
+app.get('/api/admin/users', authMiddleware.checkAuth, (req, res) =>
+  proxyToBackend(req, res, { method: 'GET', backendPath: '/admin/users' }));
+
+app.patch('/api/admin/users/:id/block', authMiddleware.checkAuth, (req, res) =>
+  proxyToBackend(req, res, { method: 'PATCH', backendPath: `/admin/users/${req.params.id}/block` }));
+
+app.patch('/api/admin/users/:id/unblock', authMiddleware.checkAuth, (req, res) =>
+  proxyToBackend(req, res, { method: 'PATCH', backendPath: `/admin/users/${req.params.id}/unblock` }));
+
+app.patch('/api/admin/users/:id/whitelist', authMiddleware.checkAuth, (req, res) =>
+  proxyToBackend(req, res, { method: 'PATCH', backendPath: `/admin/users/${req.params.id}/whitelist` }));
+
+app.patch('/api/admin/users/:id/unwhitelist', authMiddleware.checkAuth, (req, res) =>
+  proxyToBackend(req, res, { method: 'PATCH', backendPath: `/admin/users/${req.params.id}/unwhitelist` }));
+
+app.get('/api/admin/tmp/info', authMiddleware.checkAuth, (req, res) =>
+  proxyToBackend(req, res, { method: 'GET', backendPath: '/admin/tmp/info' }));
+
+app.delete('/api/admin/tmp/clear', authMiddleware.checkAuth, (req, res) =>
+  proxyToBackend(req, res, { method: 'DELETE', backendPath: '/admin/tmp/clear' }));
 
 // Upload and process PDF
 app.post('/api/process-pdf', authMiddleware.checkAuth, upload.single('file'), async (req, res) => {

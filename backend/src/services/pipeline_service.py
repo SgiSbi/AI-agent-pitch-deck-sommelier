@@ -385,6 +385,30 @@ class PipelineService:
         return docx_path, stats
 
 
+    async def get_report_docx(
+        self,
+        report_id: int,
+        current_user_id: int,
+        current_user_role: str,
+    ) -> Path:
+        """Возвращает путь к DOCX отчёта, проверяя права доступа."""
+        from sqlalchemy import select
+        from ..db.models import Report
+
+        result = await self.db.execute(select(Report).where(Report.id == report_id))
+        report = result.scalar_one_or_none()
+        if report is None:
+            raise HTTPException(status_code=404, detail="Отчёт не найден")
+        if report.user_id != current_user_id and current_user_role != "admin":
+            raise HTTPException(status_code=403, detail="Нет доступа к этому отчёту")
+        if not report.docx_path:
+            raise HTTPException(status_code=404, detail="Файл отчёта недоступен")
+        docx_path = Path(report.docx_path)
+        if not docx_path.exists():
+            raise HTTPException(status_code=404, detail="Файл отчёта не найден на диске")
+        return docx_path
+
+
 def get_pipeline_service(db: AsyncSession) -> PipelineService:
     """
     Фабрика для использования с FastAPI Depends (инъекция зависимостей).

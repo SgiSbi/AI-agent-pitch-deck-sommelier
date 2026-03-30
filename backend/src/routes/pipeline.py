@@ -76,3 +76,23 @@ async def process_pdf_section(
     response.headers["X-Output-Tokens"] = str(stats.get("output_tokens", 0))
     response.headers["X-Tavily-Requests"] = str(stats.get("tavily_requests", 0))
     return response
+
+
+@router.get("/reports/{report_id}/download")
+async def download_report(
+    report_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    """Скачать DOCX отчёт по id (только свой отчёт)."""
+    service = get_pipeline_service(db=db)
+    docx_path = await service.get_report_docx(
+        report_id=report_id,
+        current_user_id=current_user.id,
+        current_user_role=current_user.role,
+    )
+    return FileResponse(
+        path=str(docx_path),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=docx_path.name,
+    )
