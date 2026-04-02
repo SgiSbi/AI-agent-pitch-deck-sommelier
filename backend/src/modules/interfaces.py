@@ -94,7 +94,7 @@ class ILLMClient(Protocol):
 @runtime_checkable
 class ISearchClient(Protocol):
     """
-    Интерфейс поисковой системы\.
+    Интерфейс поисковой системы.
     """
 
     def search(self, queries: List[str], max_results: int = 4) -> str:

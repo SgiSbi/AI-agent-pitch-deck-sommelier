@@ -16,15 +16,16 @@
 
 ## Обзор системы
 
-Бекенд представляет собой FastAPI-приложение для автоматизированного анализа стартап-презентаций (pitch deck) на предмет венчурной инвестопригодности. Система использует мультимодальные LLM (Qwen для анализа изображений, DeepSeek для текстового анализа) и веб-поиск (Tavily) для поиска и валидации информации.
+Бекенд — FastAPI-приложение для автоматизированного анализа стартап-презентаций (pitch deck) на предмет венчурной инвестопригодности. Система использует мультимодальные LLM (Qwen для анализа изображений, DeepSeek для текстового анализа) и веб-поиск (Tavily) для поиска и валидации информации.
 
 ### Основные возможности
 - Конвертация PDF-презентаций в изображения слайдов
 - Извлечение текста и визуальной информации с помощью Qwen Vision
 - Многоэтапный анализ через DeepSeek (рынок, конкуренты, продукт, команда, финальный вердикт)
 - Веб-поиск для верификации фактов через Tavily API
-- Генерация структурированных отчетов в формате DOCX
-- Управление временными файлами и кэшированием результатов
+- Генерация структурированных отчётов в формате DOCX
+- JWT-авторизация, ролевая система (standard / admin), вайтлист
+- Административная панель управления пользователями и очистки tmp
 
 ---
 
@@ -32,16 +33,16 @@
 
 ### Общая схема
 ```
-PDF → Конвертация в изображения → Qwen (извлечение текста) → 
+PDF → Конвертация в изображения → Qwen (извлечение текста) →
 → Генерация поисковых запросов → Tavily (веб-поиск) →
 → DeepSeek (5 параллельных секций анализа) → DeepSeek (финальный вердикт) →
 → Markdown → DOCX
 ```
 
 ### Принципы проектирования
-- **Модульность**: каждый этап пайплайна изолирован в отдельной функции
-- **Параллелизм**: секции анализа DeepSeek выполняются параллельно через ThreadPoolExecutor
-- **Отказоустойчивость**: автоматические ретраи для HTTP-запросов к LLM API
+- **Модульность**: каждый этап пайплайна изолирован за интерфейсом (Protocol)
+- **Dependency Injection**: все зависимости передаются через конструктор `PipelineService`
+- **Параллелизм**: секции анализа DeepSeek выполняются параллельно через `ThreadPoolExecutor`
 - **Трассируемость**: полное логирование всех запросов/ответов в файловую систему
 
 ---
@@ -52,21 +53,20 @@ PDF → Конвертация в изображения → Qwen (извлеч�
 - **Python 3.12**: язык программирования
 - **FastAPI 0.135.1**: веб-фреймворк для REST API
 - **Uvicorn 0.41.0**: ASGI-сервер
+- **SQLAlchemy 2.0+ (async)**: ORM
+- **asyncpg 0.29+**: асинхронный драйвер PostgreSQL
 - **PyMuPDF (fitz) 1.27.1**: конвертация PDF в изображения
-- **python-docx 1.2.0**: генерация DOCX-отчетов
+- **python-docx 1.2.0**: генерация DOCX-отчётов
+- **bcrypt 4.0+**: хеширование паролей
+- **python-jose 3.3+**: JWT-токены
 - **requests 2.32.5**: HTTP-клиент для LLM API
 
 ### Внешние сервисы
 - **RouterAI API**: прокси для доступа к Qwen и DeepSeek моделям
 - **Qwen3-VL-32B-Instruct**: мультимодальная модель для анализа изображений
-- **DeepSeek-R1-0528**: модель для текстового анализа секций
+- **DeepSeek-R1-0528**: модель для текстового анализа секций и финального вердикта
 - **DeepSeek-V3.2**: модель для генерации поисковых запросов
 - **Tavily API**: веб-поиск для верификации фактов
-
-### Вспомогательные библиотеки
-- **python-dotenv 1.2.2**: управление переменными окружения
-- **pydantic 2.12.5**: валидация данных
-- **python-multipart 0.0.22**: обработка multipart/form-data
 
 ---
 
@@ -74,713 +74,414 @@ PDF → Конвертация в изображения → Qwen (извлеч�
 
 ```
 backend/
-├── src/                          # Исходный код
-│   ├── main.py                   # FastAPI приложение и эндпоинты
-│   ├── pipeline.py               # Основной пайплайн обработки
-│   ├── llm_clients.py            # Клиенты для LLM API
-│   ├── pdf_to_images.py          # Конвертация PDF
-│   ├── qwen_image.py             # Работа с Qwen Vision
-│   ├── tavily_client.py          # Клиент Tavily Search
-│   ├── formatting.py             # Конвертация MD в DOCX
-│   └── __init__.py
-├── promts/                       # Промпты для LLM
-│   ├── text_extraction.md        # Извлечение текста из слайдов
-│   ├── additional_prompt_for_websearch.md  # Генерация поисковых запросов
-│   ├── 1_info_from_pdf_prompt.md # Секция 1: Общая информация
-│   ├── 2_market_analyze_prompt.md # Секция 2: Анализ рынка
-│   ├── 3_competitors_analyze_prompt.md # Секция 3: Конкуренты
-│   ├── 4_product_analyze_prompt.md # Секция 4: Продукт
-│   ├── 5_team_analyze_prompt.md  # Секция 5: Команда
-│   └── 6_final_verdict_prompt.md # Финальный вердикт
-├── tmp/                          # Временные файлы (не в git)
-│   ├── raw_presentations/        # Загруженные PDF
-│   ├── slides/                   # Изображения слайдов
-│   ├── text_from_slides/         # Текст от Qwen
-│   ├── qwen/                     # Запросы/ответы Qwen
-│   ├── deepseek/                 # Запросы/ответы DeepSeek
-│   ├── tavily/                   # Результаты веб-поиска
-│   └── report_logs/              # Логи генерации отчетов
-├── reports/                      # Готовые DOCX-отчеты
-├── requirements.txt              # Python-зависимости
-├── Dockerfile                    # Docker-образ
-├── .env.backend                  # Переменные окружения
-└── env_example.md                # Пример конфигурации
+├── src/
+│   ├── main.py                        # FastAPI app, startup, роутеры
+│   ├── db/
+│   │   ├── models.py                  # ORM-модели: User, Report
+│   │   ├── session.py                 # AsyncEngine, get_db, Base
+│   │   └── db_config.py               # DATABASE_URL из env
+│   ├── routes/
+│   │   ├── users.py                   # /users/*
+│   │   ├── pipeline.py                # /pipeline/*
+│   │   └── admin.py                   # /admin/*
+│   ├── services/
+│   │   └── pipeline_service.py        # PipelineService — оркестратор пайплайна
+│   ├── modules/
+│   │   ├── interfaces.py              # Protocol-интерфейсы всех компонентов
+│   │   ├── llm_client_impl.py         # DefaultLLMClient (Qwen + DeepSeek)
+│   │   ├── search_client_impl.py      # TavilySearchClient
+│   │   ├── slides_extractor_impl.py   # PdfSlidesExtractor (PyMuPDF)
+│   │   ├── docx_converter_impl.py     # DocxConverterService (MD → DOCX)
+│   │   ├── markdown_builder_impl.py   # MarkdownBuilderService
+│   │   ├── security.py                # bcrypt + JWT
+│   │   ├── deps.py                    # FastAPI dependencies
+│   │   ├── logging_impl.py            # default_logger
+│   │   └── paths.py                   # Пути к директориям
+│   ├── repositories/
+│   │   ├── interfaces.py              # UserRepository, ReportRepository (Protocol)
+│   │   └── sqlalchemy_repos.py        # SQLAlchemy-реализации
+│   └── schemas/
+│       ├── user.py                    # UserRegister, UserRead, UserAdminRead, ...
+│       ├── report.py                  # ReportRead
+│       └── pipeline.py                # SectionName (enum), SECTION_PROMPT_MAP
+├── promts/                            # Промпты для LLM (8 файлов)
+├── reports/                           # Готовые DOCX-отчёты
+├── tmp/                               # Временные файлы (не в git)
+├── requirements.txt
+├── Dockerfile
+├── .env.backend
+└── env_example.md
 ```
 
 ---
 
 ## Основные компоненты
 
-### 1. main.py - FastAPI приложение
+### 1. main.py — FastAPI приложение
 
-Точка входа приложения, содержит все HTTP-эндпоинты.
+Точка входа. Регистрирует роутеры, настраивает CORS, инициализирует БД при старте.
 
-**Ключевые функции:**
-- `_save_uploaded_pdf()`: сохранение загруженного PDF с генерацией уникального ID
-- `process_pdf()`: полный пайплайн обработки (основной эндпоинт)
-- Поэтапные эндпоинты для отладки и тестирования
-- Утилиты для управления временными файлами
+**Startup-логика (`on_startup`):**
+- `RESET_DB=True` — полный сброс схемы БД
+- `ADMIN_LOGIN` + `ADMIN_PASSWORD` — создаёт admin-пользователя при первом запуске, если не существует
 
-**Особенности:**
-- Генерация уникальных идентификаторов презентаций: `{название}_{дата}_{uuid}`
-- Возврат статистики использования токенов в HTTP-заголовках
-- Валидация типов файлов (PDF, изображения)
-
-### 2. pipeline.py - Основной пайплайн
-
-Содержит всю логику обработки презентаций от PDF до DOCX.
-
-**Основные функции:**
-
-`extract_slides_stage(pdf_path, presentation_dir)` → List[str]
-- Конвертирует PDF в изображения слайдов (60 DPI, PNG)
-- Возвращает список путей к изображениям
-
-`qwen_from_slides_stage(image_paths, presentation_dir, stats)` → str
-- Отправляет изображения в Qwen для извлечения текста
-- Обрабатывает слайды чанками по 3 изображения параллельно
-- Возвращает объединенный текст всех слайдов
-
-`generate_tavily_queries_stage(qwen_text, presentation_dir, stats)` → Dict[str, List[str]]
-- Генерирует поисковые запросы через DeepSeek
-- Парсит ответ в структуру {категория: [запросы]}
-- Категории: Команда, Рынок, Конкуренция, Продукт, Редфлаги, Трекшн
-
-`send_section_to_deepseek(prompt_filename, qwen_text, presentation_dir, tavily_queries_by_category, stats)` → str
-- Отправляет одну секцию анализа в DeepSeek
-- Для секций 1-5 выполняет веб-поиск через Tavily (до 8 запросов, 5 результатов на запрос)
-- Возвращает markdown-текст секции
-
-`run_deepseek_sections(qwen_text, presentation_dir, tavily_queries_by_category, stats)` → Tuple[List[str], str]
-- Параллельно обрабатывает 5 секций анализа через ThreadPoolExecutor
-- Возвращает список текстов секций и объединенный markdown
-
-`run_final_verdict(intermediate_md, presentation_dir, stats)` → str
-- Генерирует финальный вердикт на основе всех секций
-- Использует промпт 6_final_verdict_prompt.md
-
-`build_full_markdown(section_texts, final_text)` → str
-- Объединяет все секции в единый markdown-документ
-
-`markdown_to_docx(md_path, docx_path)` → None
-- Конвертирует markdown в DOCX через formatting.py
-
-`run_full_pipeline(pdf_path, presentation_dir, user_label)` → Tuple[Path, Dict[str, int]]
-- Оркестрирует весь процесс от PDF до DOCX
-- Возвращает путь к DOCX и статистику (input_tokens, output_tokens, tavily_requests)
-
-**Механизм ретраев:**
-- `_post_deepseek()`: до 3 попыток при HTTP 5xx/429 или некорректном формате ответа
-- Экспоненциальная задержка: 2, 4, 6 секунд
-- Логирование всех запросов/ответов в JSON
+**CORS:** настраивается через `CORS_ORIGINS` (comma-separated список origins).
 
 ---
 
-### 3. llm_clients.py - Клиенты LLM
+### 2. PipelineService — оркестратор пайплайна
 
-Конфигурация и обертки для работы с LLM API.
+`backend/src/services/pipeline_service.py`
 
-**Класс LLMConfig:**
-- Загружает переменные окружения из `.env.backend`
-- Хранит API ключи, базовые URL и названия моделей
-- Поддерживает отдельную модель для генерации запросов (DEEPSEEK_QUERYGEN_MODEL)
+Инкапсулирует весь сценарий обработки презентации. Все зависимости (LLM, поиск, конвертер и т.д.) передаются через конструктор — это позволяет подменять реализации в тестах.
 
-**Функции:**
-- `call_qwen_with_images(prompt, image_paths)`: вызов Qwen с изображениями (устаревший метод)
-- `call_deepseek(prompt)`: простой вызов DeepSeek
-- `call_deepseek_querygen(prompt)`: вызов модели для генерации запросов
-- `_post_chat_completion()`: универсальная функция для OpenAI-совместимых API
+**Публичные методы:**
+- `run_full_pipeline(pdf_path, presentation_dir, user_label, user_id)` → `(Path, Dict[str, int])` — полный пайплайн, возвращает путь к DOCX и статистику токенов
+- `run_single_section(pdf_path, presentation_dir, section, user_label, user_id)` → `(Path, Dict[str, int])` — генерация одной секции
+- `get_report_docx(report_id, current_user_id, current_user_role)` → `Path` — получение DOCX по id отчёта
 
-### 4. pdf_to_images.py - Конвертация PDF
+**Внутренняя реализация:**
+- `_run_full_pipeline_sync()` — синхронная реализация, запускается через `anyio.to_thread.run_sync`
+- Этапы: извлечение слайдов → Qwen → генерация Tavily-запросов → параллельные секции DeepSeek → финальный вердикт → Markdown → DOCX
 
-**Функция `pdf_to_images()`:**
-- Использует PyMuPDF (fitz) для рендеринга страниц
-- Параметры: DPI (по умолчанию 150), формат (png/jpg)
-- Возвращает список путей к созданным изображениям
-- Автоматически создает выходную директорию
+---
 
-**Особенности:**
-- Zoom-фактор рассчитывается как DPI/72
-- Имена файлов: `page_001.png`, `page_002.png`, и т.д.
-- Обработка ошибок при отсутствии файла
+### 3. Интерфейсы модулей
 
-### 5. qwen_image.py - Анализ изображений
+`backend/src/modules/interfaces.py`
 
-**Функция `analyze_image_with_qwen()`:**
-- Кодирует изображение в base64
-- Формирует data URL: `data:image/png;base64,{b64}`
-- Отправляет в Qwen через OpenAI-совместимый формат messages
-- Поддерживает кастомные вопросы для анализа
+Все компоненты определены как `Protocol` (runtime_checkable):
 
-**Формат запроса:**
-```python
-messages = [{
-    "role": "user",
-    "content": [
-        {"type": "text", "text": question},
-        {"type": "image_url", "image_url": {"url": data_url}}
-    ]
-}]
-```
+| Интерфейс | Реализация | Назначение |
+|---|---|---|
+| `ILogger` | `default_logger` | Логирование событий |
+| `ISlidesExtractor` | `PdfSlidesExtractor` | PDF → изображения |
+| `ILLMClient` | `DefaultLLMClient` | Все вызовы LLM API |
+| `ISearchClient` | `TavilySearchClient` | Веб-поиск |
+| `IMarkdownBuilder` | `MarkdownBuilderService` | Сборка Markdown |
+| `IDocxConverter` | `DocxConverterService` | Markdown → DOCX |
 
-### 6. tavily_client.py - Веб-поиск
+**Методы `ILLMClient`:**
+- `extract_information_from_images(image_paths, presentation_dir)` — Qwen Vision
+- `generate_tavily_queries(qwen_text, presentation_dir, stats)` — генерация поисковых запросов
+- `run_section(prompt_filename, qwen_text, presentation_dir, search_results, stats)` — одна секция DeepSeek
+- `run_sections(qwen_text, presentation_dir, tavily_queries_by_category, stats)` — 5 секций параллельно
+- `run_final_verdict(intermediate_md, presentation_dir, stats)` — финальный вердикт
 
-**Функция `search_web()`:**
-- Выполняет множественные поисковые запросы через Tavily API
-- Параметры: список запросов, max_results_per_query (1-20)
-- Режим поиска: "advanced" для более глубокого анализа
+---
+
+### 4. DefaultLLMClient
+
+`backend/src/modules/llm_client_impl.py`
+
+Реализует `ILLMClient`. Использует OpenAI-совместимый `/v1/chat/completions` через RouterAI.
+
+**Конфигурация (`LLMConfig`):**
+- `QWEN_API_KEY`, `QWEN_API_BASE`, `QWEN_MODEL`
+- `DEEPSEEK_API_KEY`, `DEEPSEEK_API_BASE`, `DEEPSEEK_MODEL`
+- `DEEPSEEK_QUERYGEN_MODEL` — отдельная модель для генерации запросов
+
+**Методы:**
+- `call_qwen_with_images(prompt, image_paths)` — мультимодальный вызов Qwen
+- `call_deepseek(prompt)` — текстовый вызов DeepSeek (основная модель)
+- `call_deepseek_querygen(prompt)` — вызов модели для генерации запросов
+- `analyze_image(image_path, question)` — анализ одного изображения (base64 data URL)
+
+**Обработка ошибок:** `LLMConnectionError` при сетевых ошибках или HTTP 4xx/5xx.
+
+---
+
+### 5. TavilySearchClient
+
+`backend/src/modules/search_client_impl.py`
+
+Реализует `ISearchClient`. Выполняет множественные поисковые запросы через Tavily API.
+
+**Метод `search(queries, max_results)`:**
+- Режим поиска: `advanced`
 - Дедупликация результатов по URL
-
-**Возвращаемые данные:**
-- Форматированный текст для промпта (по умолчанию)
-- Опционально: кортеж (текст, сырые ответы) при `return_raw=True`
+- Форматирование: до 12 000 символов итогового текста, до 800 символов на результат
 
 **Формат результатов:**
 ```
 [1] Заголовок страницы
 URL: https://example.com
-Content: Фрагмент текста (до 800 символов)...
+Content: Фрагмент текста...
 ```
 
-**Ограничения:**
-- Максимум 12000 символов в итоговом тексте
-- Логирование через callback-функцию
+---
 
-### 7. formatting.py - Генерация DOCX
+### 6. Авторизация и доступ
 
-Конвертирует Markdown в форматированный DOCX-документ.
+`backend/src/modules/deps.py`, `backend/src/modules/security.py`
 
-**Основная функция `convert_md_to_docx()`:**
-- Парсит Markdown построчно
-- Поддерживает заголовки (# - ####)
-- Обрабатывает списки (маркированные и нумерованные)
-- Конвертирует таблицы в Word Table Grid
-- Добавляет горизонтальные линии (---, ***, ___)
+- **`get_current_user`** — декодирует JWT, проверяет активность пользователя
+- **`require_admin`** — требует `role = admin`
+- **`require_pipeline_access`** — требует `role = admin` или `is_whitelisted = true`
+- **`save_uploaded_pdf`** — сохраняет PDF, генерирует `presentation_dir` вида `{stem}_{YYYYMMDD}_{uuid8}`
 
-**Поддерживаемое форматирование:**
-- **Жирный текст**: `**текст**`
-- *Курсив*: `*текст*`
-- Гиперссылки: `[текст](url)` и голые URL
-- Таблицы в Markdown-формате
+Пароли хранятся как bcrypt-хеши. JWT подписывается HS256, время жизни — `ACCESS_TOKEN_EXPIRE_MINUTES`.
 
-**Функции обработки:**
-- `process_text_with_formatting()`: парсинг inline-форматирования
-- `add_formatted_text_to_paragraph()`: применение стилей к параграфу
-- `add_hyperlink()`: создание кликабельных ссылок
-- `extract_domain()`: извлечение домена из URL (обрезка до 30 символов)
+---
+
+### 7. Модели данных
+
+**User:**
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `id` | int | PK |
+| `login` | string (unique) | Логин |
+| `hashed_password` | string | bcrypt-хеш |
+| `role` | string | `standard` / `admin` |
+| `plan` | string? | Тарифный план (зарезервировано) |
+| `is_active` | bool | Активен / заблокирован |
+| `is_whitelisted` | bool | Доступ к пайплайну |
+| `total_input_tokens` | bigint | Накопленные входные токены |
+| `total_output_tokens` | bigint | Накопленные выходные токены |
+| `total_tavily_requests` | int | Накопленные Tavily-запросы |
+| `created_at` | datetime | Дата регистрации |
+| `updated_at` | datetime | Дата обновления |
+
+**Report:**
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `id` | int | PK |
+| `presentation_dir` | string (unique) | Идентификатор запуска |
+| `user_id` | int? | FK → users.id (SET NULL при удалении) |
+| `pdf_path` | text? | Путь к исходному PDF |
+| `docx_path` | text? | Путь к готовому DOCX |
+| `report_log_path` | text? | Путь к JSON-логу |
+| `input_tokens` | int | Входные токены этого отчёта |
+| `output_tokens` | int | Выходные токены этого отчёта |
+| `tavily_requests` | int | Tavily-запросы этого отчёта |
+| `created_at` | datetime | Дата создания |
 
 ---
 
 ## API эндпоинты
 
-### POST /process-pdf
-**Основной эндпоинт для полного анализа презентации.**
+Все защищённые эндпоинты требуют заголовок `Authorization: Bearer <token>`.
 
-**Параметры (multipart/form-data):**
-- `file`: PDF-файл презентации (обязательный)
-- `user_id`: ID пользователя (опциональный)
-- `username`: Имя пользователя (опциональный)
+### Пользователи (`/users`)
 
-**Ответ:**
-- Тип: `application/vnd.openxmlformats-officedocument.wordprocessingml.document`
-- Файл: DOCX-отчет
-- Заголовки:
-  - `X-Input-Tokens`: количество входных токенов
-  - `X-Output-Tokens`: количество выходных токенов
-  - `X-Tavily-Requests`: количество запросов к Tavily
+| Метод | Путь | Доступ | Описание |
+|---|---|---|---|
+| POST | `/users/register` | Публичный | Регистрация |
+| POST | `/users/login` | Публичный | Авторизация (JSON) → JWT |
+| POST | `/users/login/form` | Публичный | OAuth2 form-логин (Swagger UI) |
+| GET | `/users/me` | 🔒 | Профиль текущего пользователя |
+| GET | `/users/me/reports` | 🔒 | Список отчётов пользователя |
 
-**Процесс:**
-1. Сохранение PDF
-2. Извлечение слайдов
-3. Анализ через Qwen
-4. Генерация поисковых запросов
-5. Веб-поиск через Tavily
-6. Параллельный анализ 5 секций через DeepSeek
-7. Финальный вердикт
-8. Генерация DOCX
+### Пайплайн (`/pipeline`)
 
-**Пример использования:**
-```bash
-curl -X POST "http://localhost:8000/process-pdf" \
-  -F "file=@presentation.pdf" \
-  -F "user_id=12345" \
-  -F "username=john_doe" \
-  -o report.docx
-```
+Доступен только пользователям с `is_whitelisted = true` или `role = admin`.
 
----
+| Метод | Путь | Описание |
+|---|---|---|
+| POST | `/pipeline/process-pdf` | Полный пайплайн: PDF → DOCX |
+| POST | `/pipeline/process-pdf/section` | Генерация одной секции |
+| GET | `/pipeline/reports/{report_id}/download` | Скачать DOCX по id отчёта |
 
-### POST /stage/extract-slides
-**Этап 1: Извлечение слайдов из PDF.**
+**POST /pipeline/process-pdf** — принимает `multipart/form-data` с полем `file` (PDF). Возвращает DOCX-файл с заголовками:
+- `X-Input-Tokens`, `X-Output-Tokens`, `X-Tavily-Requests`
 
-**Параметры:**
-- `file`: PDF-файл
+**POST /pipeline/process-pdf/section** — дополнительно принимает поле `section` (enum `SectionName`):
 
-**Ответ (JSON):**
-```json
-{
-  "presentation_dir": "MyProject_20260312_a1b2c3d4",
-  "images": [
-    "/path/to/slides/page_001.png",
-    "/path/to/slides/page_002.png"
-  ]
-}
-```
+| Значение | Описание |
+|---|---|
+| `1_info_from_pdf` | Общая информация о стартапе |
+| `2_market_analyze` | Анализ рынка (TAM/SAM/SOM) |
+| `3_competitors_analyze` | Анализ конкурентов |
+| `4_product_analyze` | Анализ продукта |
+| `5_team_analyze` | Анализ команды |
+| `6_final_verdict` | Итоговый инвестиционный вердикт |
 
----
+**GET /pipeline/reports/{report_id}/download** — скачать DOCX по id. Пользователь может скачать только свои отчёты; администратор — любые.
 
-### POST /stage/qwen-from-pdf
-**Этапы 1+2: Извлечение слайдов + анализ через Qwen.**
+### Администрирование (`/admin`)
 
-**Параметры:**
-- `file`: PDF-файл
+Доступно только пользователям с `role = admin`.
 
-**Ответ (JSON):**
-```json
-{
-  "presentation_dir": "MyProject_20260312_a1b2c3d4",
-  "images": ["..."],
-  "qwen_text": "Слайд #1:\n— Текст: ...\n— Изображения: ..."
-}
-```
+| Метод | Путь | Описание |
+|---|---|---|
+| GET | `/admin/users` | Список всех пользователей со статистикой |
+| GET | `/admin/users/{user_id}` | Детальная информация о пользователе |
+| PATCH | `/admin/users/{user_id}/block` | Заблокировать пользователя |
+| PATCH | `/admin/users/{user_id}/unblock` | Разблокировать пользователя |
+| PATCH | `/admin/users/{user_id}/whitelist` | Добавить в вайтлист |
+| PATCH | `/admin/users/{user_id}/unwhitelist` | Убрать из вайтлиста |
+| GET | `/admin/tmp/info` | Размер директории tmp |
+| DELETE | `/admin/tmp/clear` | Очистить директорию tmp |
 
----
-
-### POST /stage/deepseek-section
-**Этап 3: Отправка отдельной секции в DeepSeek.**
-
-**Параметры (JSON):**
-```json
-{
-  "prompt_filename": "2_market_analyze_prompt.md",
-  "qwen_text": "текст от Qwen",
-  "presentation_dir": "MyProject_20260312_a1b2c3d4"
-}
-```
-
-**Ответ (JSON):**
-```json
-{
-  "presentation_dir": "MyProject_20260312_a1b2c3d4",
-  "prompt_filename": "2_market_analyze_prompt.md",
-  "section_text": "## 2. Анализ рынка\n..."
-}
-```
-
----
-
-### POST /debug/markdown-from-pdf
-**DEBUG: Полный пайплайн без генерации DOCX.**
-
-**Параметры:**
-- `file`: PDF-файл
-
-**Ответ (JSON):**
-```json
-{
-  "qwen_text": "...",
-  "section_texts": ["секция 1", "секция 2", ...],
-  "final_text": "финальный вердикт",
-  "markdown": "полный markdown-документ"
-}
-```
-
-**Использование:** отладка промптов, проверка качества анализа без генерации DOCX.
-
----
-
-### POST /stage/qwen-image
-**Анализ одного изображения через Qwen.**
-
-**Параметры:**
-- `file`: изображение (PNG/JPEG)
-- `question`: текстовый вопрос (query parameter, по умолчанию: "Что изображено на этой картинке?")
-
-**Ответ (JSON):**
-```json
-{
-  "question": "Опиши этот график",
-  "answer": "На графике показан рост выручки...",
-  "image_path": "/tmp/abc123_image.png"
-}
-```
-
----
-
-### GET /tmp/size
-**Получение размера временной директории.**
-
-**Ответ (JSON):**
-```json
-{
-  "size_bytes": 1048576,
-  "size_formatted": "1.00 MB",
-  "files_count": 42,
-  "path": "/backend/tmp"
-}
-```
-
----
-
-### DELETE /tmp/cleanup
-**Очистка временной директории.**
-
-**Ответ (JSON):**
-```json
-{
-  "success": true,
-  "message": "Директория tmp успешно очищена",
-  "deleted_items": 42,
-  "freed_bytes": 1048576,
-  "freed_formatted": "1.00 MB"
-}
-```
-
-**Примечание:** Сохраняет файл `.gitkeep`.
+**Ограничения admin-эндпоинтов:** нельзя изменять самого себя и других администраторов.
 
 ---
 
 ## Пайплайн обработки
 
-### Детальная схема этапов
+### Этапы
 
-#### Этап 0: Прием и сохранение PDF
-- Валидация типа файла (application/pdf)
-- Генерация уникального ID: `{название}_{YYYYMMDD}_{uuid8}`
+#### Этап 0: Приём и сохранение PDF
+- Валидация типа файла (`application/pdf`)
+- Генерация уникального ID: `{stem}_{YYYYMMDD}_{uuid8}` (часовой пояс GMT+7)
 - Сохранение в `tmp/raw_presentations/`
 
-#### Этап 1: Конвертация PDF → Изображения
-**Функция:** `extract_slides_stage()`
-- Использует PyMuPDF для рендеринга
-- Параметры: 60 DPI, формат PNG
+#### Этап 1: PDF → изображения
+- `PdfSlidesExtractor.pdf_to_images()` через PyMuPDF
 - Сохранение в `tmp/slides/{presentation_dir}/`
-- Результат: список путей к изображениям
 
 #### Этап 2: Извлечение текста через Qwen
-**Функция:** `qwen_from_slides_stage()`
-- Разбивка слайдов на чанки по 3 изображения
-- Параллельная обработка чанков через ThreadPoolExecutor
-- Кодирование изображений в base64 data URLs
+- `ILLMClient.extract_information_from_images()`
 - Промпт: `text_extraction.md`
 - Модель: `qwen/qwen3-vl-32b-instruct`
-- Сохранение запросов/ответов в `tmp/qwen/`
-- Результат: объединенный текст всех слайдов
+- Логи: `tmp/qwen/{presentation_dir}/`
 
-**Формат вывода Qwen:**
-```
-Слайд #1:
-— Текст: [полный текст]
-— Изображения: [описание графиков/диаграмм]
-— Примечания: [дополнительная информация]
-```
-
-#### Этап 2.5: Генерация поисковых запросов
-**Функция:** `generate_tavily_queries_stage()`
+#### Этап 3: Генерация поисковых запросов
+- `ILLMClient.generate_tavily_queries()`
 - Промпт: `additional_prompt_for_websearch.md`
-- Модель: `deepseek/deepseek-v3.2`
-- Извлечение сущностей: названия, ФИО, организации, технологии, конкуренты
-- Генерация 1-3 запросов на категорию
-- Категории: Команда, Рынок, Конкуренция, Продукт, Команда (дополнительно)
-- Сохранение в `tmp/tavily/query_generation/{presentation_dir}/`
-- Результат: `Dict[str, List[str]]` - категория → список запросов
+- Модель: `deepseek/deepseek-v3.2` (или `DEEPSEEK_QUERYGEN_MODEL`)
+- Результат: `Dict[str, List[str]]` — категория → список запросов
 
-**Пример структуры запросов:**
-```json
-{
-  "Команда": [
-    "\"Иванов Иван\" (МГУ OR Москва) github",
-    "\"Петров Петр\" linkedin опыт разработки"
-  ],
-  "Рынок": [
-    "рынок EdTech Россия объем 2025",
-    "количество онлайн-школ РФ статистика"
-  ],
-  "Конкуренция": [
-    "\"Конкурент1\" отзывы проблемы Россия",
-    "\"Конкурент2\" цена продажи"
-  ]
-}
-```
+#### Этап 4: Параллельный анализ 5 секций
+- `ILLMClient.run_sections()` — `ThreadPoolExecutor(max_workers=5)`
+- Для каждой секции: Tavily-поиск → промпт + результаты → DeepSeek R1
+- Логи: `tmp/deepseek/{section_name}/`, `tmp/report_logs/{presentation_dir}/sections/`
 
-#### Этап 3: Анализ секций через DeepSeek + Tavily
-**Функция:** `run_deepseek_sections()`
+| Секция | Промпт | Tavily-категории |
+|---|---|---|
+| 1. Информация | `1_info_from_pdf_prompt.md` | Команда |
+| 2. Рынок | `2_market_analyze_prompt.md` | Рынок, Конкуренция |
+| 3. Конкуренты | `3_competitors_analyze_prompt.md` | Конкуренция |
+| 4. Продукт | `4_product_analyze_prompt.md` | Продукт |
+| 5. Команда | `5_team_analyze_prompt.md` | Команда |
 
-**5 параллельных секций:**
-1. **Общая информация** (`1_info_from_pdf_prompt.md`)
-   - Bullshit Score, проблема, решение, рынок, бизнес-модель, трекшн, команда, запрос
-   - Tavily: категории "Команда", "Команда (дополнительно)"
-   
-2. **Анализ рынка** (`2_market_analyze_prompt.md`)
-   - TAM/SAM/SOM, динамика рынка, барьеры входа
-   - Tavily: категории "Рынок", "Конкуренция"
-   
-3. **Анализ конкурентов** (`3_competitors_analyze_prompt.md`)
-   - Прямые/косвенные конкуренты, конкурентные преимущества
-   - Tavily: категория "Конкуренция"
-   
-4. **Анализ продукта** (`4_product_analyze_prompt.md`)
-   - Технологический стек, уникальность, IP, масштабируемость
-   - Tavily: категория "Продукт"
-   
-5. **Анализ команды** (`5_team_analyze_prompt.md`)
-   - Опыт фаундеров, компетенции, пробелы
-   - Tavily: категории "Команда", "Команда (дополнительно)"
-
-**Процесс для каждой секции:**
-1. Выбор релевантных категорий запросов
-2. Выполнение до 8 запросов через Tavily (5 результатов на запрос)
-3. Форматирование результатов поиска (до 12000 символов)
-4. Формирование промпта: базовый промпт + веб-поиск + текст слайдов
-5. Отправка в DeepSeek (`deepseek/deepseek-r1-0528`)
-6. Сохранение запросов/ответов в `tmp/deepseek/{section_name}/`
-7. Логирование в `tmp/report_logs/{presentation_dir}/sections/{section_name}.json`
-
-**Модель:** `deepseek/deepseek-r1-0528`
-**Timeout:** 600 секунд
-**Ретраи:** до 3 попыток при ошибках
-
-#### Этап 4: Финальный вердикт
-**Функция:** `run_final_verdict()`
-- Промпт: `6_final_verdict_prompt.md` + все 5 секций
+#### Этап 5: Финальный вердикт
+- `ILLMClient.run_final_verdict()` — промпт `6_final_verdict_prompt.md` + все 5 секций
 - Модель: `deepseek/deepseek-r1-0528`
-- Синтез итоговой рекомендации на основе всех анализов
-- Сохранение в `tmp/deepseek/final_verdict/`
 
-#### Этап 5: Генерация отчета
-**Функции:** `build_full_markdown()` + `markdown_to_docx()`
-1. Объединение всех секций в единый Markdown
-2. Сохранение в `tmp/{presentation_dir}.md`
-3. Конвертация Markdown → DOCX через `formatting.py`
-4. Сохранение финального отчета в `reports/{presentation_dir}.docx`
+#### Этап 6: Генерация отчёта
+- `IMarkdownBuilder.build_full_markdown()` → `tmp/{presentation_dir}.md`
+- `IDocxConverter.convert_md_to_docx()` → `reports/{presentation_dir}.docx`
 
-**Структура отчета:**
-```
-# АНАЛИТИЧЕСКИЙ ОТЧЁТ ПО ПРОЕКТУ [Название]
-## 1. Информация из презентации
-## 2. Анализ рынка
-## 3. Анализ конкурентов
-## 4. Анализ продукта
-## 5. Анализ команды
-## 6. Финальный вердикт
-```
+### Производительность
 
-### Параллелизм и производительность
+| Этап | Параллелизм | Типичное время |
+|---|---|---|
+| PDF → PNG | — | ~5 сек |
+| Qwen | — | ~30–60 сек |
+| Генерация Tavily-запросов | — | ~10–20 сек |
+| Tavily поиск | последовательно | ~20–40 сек |
+| DeepSeek секции 1–5 | ThreadPoolExecutor (5) | ~60–120 сек |
+| Финальный вердикт | — | ~30–60 сек |
+| Генерация DOCX | — | ~2–5 сек |
 
-**Параллельная обработка:**
-- Чанки слайдов в Qwen: ThreadPoolExecutor, max_workers = количество чанков
-- Секции DeepSeek: ThreadPoolExecutor, max_workers = 5
-
-**Типичное время выполнения:**
-- Конвертация PDF (10 слайдов): ~5 секунд
-- Qwen анализ (10 слайдов, 4 чанка): ~30-60 секунд
-- Генерация запросов: ~10-20 секунд
-- Tavily поиск (5 секций × 8 запросов): ~20-40 секунд
-- DeepSeek секции (параллельно): ~60-120 секунд
-- Финальный вердикт: ~30-60 секунд
-- Генерация DOCX: ~2-5 секунд
-
-**Итого:** 3-6 минут на полный анализ презентации.
+Итого: **3–6 минут** на полный анализ.
 
 ### Обработка ошибок
 
-**Стратегия ретраев:**
-- HTTP 429 (Rate Limit): повтор с задержкой
-- HTTP 5xx (Server Error): повтор с задержкой
-- Некорректный формат ответа: повтор
-- Экспоненциальная задержка: 2s, 4s, 6s
-- Максимум попыток: 3
-
-**Логирование ошибок:**
-- Все запросы/ответы сохраняются в JSON
-- Timestamp в GMT+7
-- Компонент и имя промпта в логах
+- `LLMConnectionError` при сетевых ошибках → HTTP 503
+- Ретраи: до 3 попыток при HTTP 429/5xx, задержка 2/4/6 сек
+- Все запросы/ответы сохраняются в JSON для отладки
 
 ---
 
 ## Конфигурация и переменные окружения
 
-### Файл .env.backend
+Файл `backend/.env.backend`. Шаблон — `backend/env_example.md`.
 
-Все конфигурационные параметры хранятся в `.env.backend` в корне директории `backend/`.
-
-**Обязательные переменные:**
-
-```bash
-# Qwen API (мультимодальная модель для анализа изображений)
-QWEN_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```env
+# LLM API
+QWEN_API_KEY=
 QWEN_API_BASE=https://routerai.ru/api/v1
 QWEN_MODEL=qwen/qwen3-vl-32b-instruct
-
-# DeepSeek API (текстовый анализ)
-DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+DEEPSEEK_API_KEY=
 DEEPSEEK_API_BASE=https://routerai.ru/api/v1
 DEEPSEEK_MODEL=deepseek/deepseek-r1-0528
-
-# DeepSeek для генерации поисковых запросов (опционально, по умолчанию = DEEPSEEK_MODEL)
 DEEPSEEK_QUERYGEN_MODEL=deepseek/deepseek-v3.2
 
-# Tavily Search API (веб-поиск)
-TAVILY_API_KEY=tvly-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-```
+# Tavily
+TAVILY_API_KEY=
 
-**Опциональные переменные (для будущего использования):**
-
-```bash
-# База данных PostgreSQL
+# База данных
 DBUSER=postgres
-DBPASSWORD=postgres
-DBHOST=localhost
+DBPASSWORD=
+DBHOST=database
 DBPORT=5432
 DBNAME=ai_agent
-RESET_DB=True
+
+# Приложение
+RESET_DB=False
+SECRET_KEY=                          # python -c "import secrets; print(secrets.token_hex(32))"
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+
+# CORS (comma-separated)
+CORS_ORIGINS=http://localhost:3000
+
+# Первый администратор (создаётся при старте, если не существует)
+ADMIN_LOGIN=
+ADMIN_PASSWORD=
 ```
 
-### Пример конфигурации
+### Пути к директориям (`paths.py`)
 
-Файл `env_example.md` содержит шаблон для создания `.env.backend`:
-
-```markdown
-QWEN_API_KEY=*API-ключ*
-QWEN_API_BASE=*url api базы*
-QWEN_MODEL=qwen/qwen3-vl-32b-instruct 
-DEEPSEEK_API_KEY=*API-ключ*
-DEEPSEEK_API_BASE=*url api базы*
-DEEPSEEK_MODEL=deepseek/deepseek-r1-0528
-DEEPSEEK_QUERYGEN_MODEL=deepseek/deepseek-v3.2
-TAVILY_API_KEY=*API-ключ от tavily.com*
+```
+backend/
+├── tmp/
+│   ├── raw_presentations/   # Загруженные PDF
+│   ├── slides/              # Изображения слайдов
+│   ├── text_from_slides/    # Текст от Qwen
+│   ├── qwen/                # Запросы/ответы Qwen
+│   ├── deepseek/            # Запросы/ответы DeepSeek по секциям
+│   ├── tavily/              # Результаты веб-поиска
+│   └── report_logs/         # Метаданные генерации отчётов
+└── reports/                 # Готовые DOCX-отчёты
 ```
 
-### Получение API ключей
+---
 
-**RouterAI (Qwen + DeepSeek):**
-1. Регистрация на https://routerai.ru
-2. Создание API ключа в личном кабинете
-3. Один ключ используется для обеих моделей
+## Развертывание
 
-**Tavily Search:**
-1. Регистрация на https://tavily.com
-2. Получение API ключа в dashboard
-3. Бесплатный тариф: 1000 запросов/месяц
+### Docker Compose
 
-### Конфигурация моделей
+Три сервиса: `database` (PostgreSQL 17), `backend` (FastAPI), `frontend` (Node.js/Express).
 
-**Qwen3-VL-32B-Instruct:**
-- Мультимодальная модель (текст + изображения)
-- Контекст: 32K токенов
-- Использование: извлечение текста и описание визуальных элементов
-
-**DeepSeek-R1-0528:**
-- Текстовая модель с reasoning capabilities
-- Контекст: 64K токенов
-- Использование: аналитические секции и финальный вердикт
-
-**DeepSeek-V3.2:**
-- Более быстрая модель для простых задач
-- Использование: генерация поисковых запросов
-
-### Настройка путей
-
-Все пути определяются в `pipeline.py` относительно `BASE_DIR`:
-
-```python
-BASE_DIR = Path(__file__).resolve().parents[1]  # backend/
-PROMPTS_DIR = BASE_DIR / "promts"
-TMP_DIR = BASE_DIR / "tmp"
-RESULT_DIR = BASE_DIR / "reports"
+```bash
+docker compose up -d --build
 ```
 
-**Временные директории:**
-- `tmp/raw_presentations/` - загруженные PDF
-- `tmp/slides/` - изображения слайдов
-- `tmp/text_from_slides/` - текст от Qwen
-- `tmp/qwen/requests/` и `tmp/qwen/responses/` - логи Qwen
-- `tmp/deepseek/{section}/` - логи DeepSeek по секциям
-- `tmp/tavily/` - результаты веб-поиска
-- `tmp/report_logs/` - метаданные генерации отчетов
+Фронтенд доступен на порту `80`. Бекенд — только внутри Docker-сети (порт 8000 не проброшен наружу).
 
-**Выходные директории:**
-- `reports/` - готовые DOCX-отчеты
+Volumes:
+- `pgdata` — данные PostgreSQL
+- `./backend/tmp` → `/backend/tmp`
+- `./backend/reports` → `/backend/reports`
+
+### Первый запуск
+
+Если `ADMIN_LOGIN` и `ADMIN_PASSWORD` заданы в `.env.backend`, администратор создаётся автоматически при старте. Иначе — зарегистрируйте пользователя через API и обновите роль в БД:
+
+```sql
+UPDATE users SET role = 'admin', is_whitelisted = true WHERE login = 'yourlogin';
+```
 
 ---
 
 ## Мониторинг и логирование
 
-### Система логирования
+### Формат логов (stdout)
 
-**Функция `_log(component, message)`:**
-- Формат: `[DD-MM-YYYY HH:MM:SS] [COMPONENT] message`
-- Часовой пояс: GMT+7
-- Вывод: stdout (перехватывается Docker/systemd)
-
-**Компоненты логирования:**
-- `PIPELINE`: основной пайплайн
-- `SLIDES`: конвертация PDF
-- `REPORTLOG`: сохранение запросов/ответов
-- `DEEPSEEK`: запросы к DeepSeek
-- `TAVILY`: веб-поиск
-- `TAVILY:QUERYGEN`: генерация запросов
-- `REPORT`: генерация финального отчета
-
-**Пример логов:**
 ```
-[12-03-2026 14:23:45] [PIPELINE] Start full pipeline for 'MyProject_20260312_a1b2c3d4'
-[12-03-2026 14:23:50] [SLIDES] Start processing PDF: /backend/tmp/raw_presentations/MyProject.pdf
-[12-03-2026 14:23:55] [SLIDES] slide processing completed successfully
-[12-03-2026 14:24:00] [PIPELINE] Starting Qwen for 'MyProject_20260312_a1b2c3d4' (10 slides)
-[12-03-2026 14:24:45] [PIPELINE] Qwen finished for 'MyProject_20260312_a1b2c3d4' (15234 chars)
-[12-03-2026 14:25:00] [TAVILY:QUERYGEN] Query plan text saved to: /backend/tmp/tavily/query_generation/...
-[12-03-2026 14:25:30] [TAVILY:2_market_analyze] Query 1/3: рынок EdTech Россия объем 2025
-[12-03-2026 14:26:00] [DEEPSEEK] 2_market_analyze: request saved to: /backend/tmp/deepseek/...
-[12-03-2026 14:27:30] [PIPELINE] Section 2/5 completed
-[12-03-2026 14:30:00] [PIPELINE] Pipeline completed: report ready at /backend/reports/MyProject_20260312_a1b2c3d4.docx
+[DD-MM-YYYY HH:MM:SS] [COMPONENT] message
 ```
 
-### Структура логов на диске
+Часовой пояс: GMT+7.
 
-**Запросы/ответы Qwen:**
-```
-tmp/qwen/
-├── requests/{presentation_dir}/
-│   ├── chunk_01_request.json
-│   ├── chunk_02_request.json
-│   └── ...
-└── responses/{presentation_dir}/
-    ├── chunk_01_response.json
-    ├── chunk_02_response.json
-    └── ...
-```
+**Компоненты:** `PIPELINE`, `SLIDES`, `QWEN`, `DEEPSEEK`, `TAVILY`, `TAVILY_QUERYGEN`, `REPORT`, `REPORTLOG`
 
-**Запросы/ответы DeepSeek:**
-```
-tmp/deepseek/
-├── 1_info_from_pdf/
-│   ├── requests/{presentation_dir}.json
-│   └── responses/{presentation_dir}.json
-├── 2_market_analyze/
-├── 3_competitors_analyze/
-├── 4_product_analyze/
-├── 5_team_analyze/
-└── final_verdict/
-```
+### JSON-логи на диске
 
-**Результаты Tavily:**
-```
-tmp/tavily/
-├── query_generation/{presentation_dir}/
-│   ├── queries_by_category.json
-│   ├── query_plan.txt
-│   ├── requests/request.json
-│   └── responses/response.json
-├── 1_info_from_pdf/{presentation_dir}/
-│   ├── queries.json
-│   ├── results.json
-│   ├── results_text.txt
-│   └── tavily_raw.json
-├── 2_market_analyze/{presentation_dir}/
-└── ...
-```
-
-**Метаданные отчетов:**
 ```
 tmp/report_logs/{presentation_dir}/
 ├── sections/
@@ -790,102 +491,23 @@ tmp/report_logs/{presentation_dir}/
 │   ├── 4_product_analyze.json
 │   ├── 5_team_analyze.json
 │   └── final_verdict.json
-├── query_generation_summary.json
 └── report_log.json
 ```
 
-**Формат section log (пример):**
-```json
-{
-  "presentation_dir": "MyProject_20260312_a1b2c3d4",
-  "prompt_filename": "2_market_analyze_prompt.md",
-  "prompt_name": "2_market_analyze",
-  "tavily": {
-    "used": true,
-    "used_categories": ["Рынок", "Конкуренция"],
-    "queries": ["рынок EdTech Россия объем 2025", "..."],
-    "dir": "/backend/tmp/tavily/2_market_analyze/MyProject_20260312_a1b2c3d4",
-    "queries_path": "...",
-    "results_path": "...",
-    "results_text_path": "...",
-    "results_char_count": 8543
-  },
-  "deepseek": {
-    "request_path": "/backend/tmp/deepseek/2_market_analyze/requests/MyProject_20260312_a1b2c3d4.json",
-    "response_path": "/backend/tmp/deepseek/2_market_analyze/responses/MyProject_20260312_a1b2c3d4.json",
-    "response_char_count": 3421
-  }
-}
-```
+### Статистика токенов
 
-**Формат report_log.json:**
-```json
-{
-  "presentation_dir": "MyProject_20260312_a1b2c3d4",
-  "paths": {
-    "pdf_path": "/backend/tmp/raw_presentations/MyProject_20260312_a1b2c3d4.pdf",
-    "md_path": "/backend/tmp/MyProject_20260312_a1b2c3d4.md",
-    "docx_path": "/backend/reports/MyProject_20260312_a1b2c3d4.docx"
-  },
-  "sizes": {
-    "md_chars": 45678,
-    "docx_bytes": 123456
-  },
-  "tavily": {
-    "query_generation_dir": "/backend/tmp/tavily/query_generation/MyProject_20260312_a1b2c3d4",
-    "per_section_root": "/backend/tmp/tavily"
-  },
-  "sections": {
-    "1_info_from_pdf": "/backend/tmp/report_logs/MyProject_20260312_a1b2c3d4/sections/1_info_from_pdf.json",
-    "2_market_analyze": "...",
-    "3_competitors_analyze": "...",
-    "4_product_analyze": "...",
-    "5_team_analyze": "...",
-    "final_verdict": "..."
-  }
-}
-```
+Возвращается в заголовках ответа и сохраняется в БД (таблица `reports` и накопительно в `users`):
 
-### Метрики и статистика
-
-**Возвращаемая статистика:**
 ```python
 {
-  "input_tokens": 125000,      # Суммарно по всем запросам
-  "output_tokens": 35000,      # Суммарно по всем ответам
-  "tavily_requests": 1         # Количество вызовов Tavily API
+  "input_tokens": 125000,
+  "output_tokens": 35000,
+  "tavily_requests": 24
 }
 ```
 
-**Источники токенов:**
-- Qwen: извлечение текста из слайдов
-- DeepSeek: генерация поисковых запросов
-- DeepSeek: 5 секций анализа
-- DeepSeek: финальный вердикт
+### API документация
 
-### Управление временными файлами
-
-**Автоматическая очистка:**
-- Эндпоинт `DELETE /tmp/cleanup` для ручной очистки
-- Рекомендуется настроить cron-задачу для периодической очистки
-
-**Пример cron-задачи (Linux):**
-```bash
-# Очистка tmp каждую ночь в 3:00
-0 3 * * * curl -X DELETE http://localhost:8000/tmp/cleanup
-```
-
-**Мониторинг размера:**
-- Эндпоинт `GET /tmp/size` для проверки использования диска
-- Настройка алертов при превышении порога (например, 10 GB)
-
-
-
-## Контакты и поддержка
-
-**API документация:**
 - Swagger UI: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 - OpenAPI схема: `http://localhost:8000/openapi.json`
-
----

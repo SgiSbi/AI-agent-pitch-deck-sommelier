@@ -52,6 +52,13 @@ class UserAdminRead(UserRead):
     reports_count: int = 0
 
 
+class UserProfileRead(UserRead):
+    """Схема профиля пользователя — включает статистику токенов."""
+    total_input_tokens: int
+    total_output_tokens: int
+    total_tavily_requests: int
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"

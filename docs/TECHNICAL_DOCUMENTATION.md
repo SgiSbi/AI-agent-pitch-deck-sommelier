@@ -10,9 +10,10 @@
 
 ## 1. Обзор проекта
 
-Система автоматизированного анализа венчурной инвестопригодности стартапов на основе pitch-deck презентаций. Пользователь загружает PDF через REST API, система анализирует его с помощью мультимодальных LLM и веб-поиска, после чего возвращает структурированный отчёт в формате DOCX.
+Система автоматизированного анализа венчурной инвестопригодности стартапов на основе pitch-deck презентаций. Пользователь загружает PDF через веб-интерфейс или REST API, система анализирует его с помощью мультимодальных LLM и веб-поиска, после чего возвращает структурированный отчёт в формате DOCX.
 
 Ключевые возможности:
+- Веб-интерфейс (Node.js/Express + vanilla JS) с авторизацией, загрузкой файлов и скачиванием отчётов
 - Конвертация PDF-слайдов в изображения для визуального анализа
 - Извлечение информации через мультимодальную модель Qwen Vision
 - Генерация поисковых запросов и обогащение данных через Tavily Web Search
@@ -20,6 +21,7 @@
 - Итоговый инвестиционный вердикт
 - Генерация отчёта в формате DOCX
 - JWT-авторизация, ролевая система (standard / admin), вайтлист
+- Административная панель: управление пользователями, очистка tmp
 
 ---
 
@@ -27,9 +29,14 @@
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Клиент / API                         │
+│              Браузер (vanilla JS SPA)                       │
 └──────────────────────────┬──────────────────────────────────┘
-                           │ HTTP REST (JWT Bearer)
+                           │ HTTP (порт 80)
+┌──────────────────────────▼──────────────────────────────────┐
+│           Frontend (Node.js / Express)                      │
+│  Express · multer · axios · JWT-сессии                      │
+└──────────────────────────┬──────────────────────────────────┘
+                           │ HTTP (внутренняя сеть Docker)
 ┌──────────────────────────▼──────────────────────────────────┐
 │                  Backend (FastAPI REST API)                  │
 │  FastAPI 0.135 · Uvicorn 0.41 · Python 3.12                 │
@@ -67,6 +74,7 @@ Ai-agent/
 │   │   ├── services/
 │   │   │   └── pipeline_service.py
 │   │   ├── modules/
+│   │   │   ├── interfaces.py    # Protocol-интерфейсы
 │   │   │   ├── llm_client_impl.py
 │   │   │   ├── search_client_impl.py
 │   │   │   ├── slides_extractor_impl.py
@@ -74,6 +82,7 @@ Ai-agent/
 │   │   │   ├── markdown_builder_impl.py
 │   │   │   ├── security.py      # bcrypt + JWT
 │   │   │   ├── deps.py          # FastAPI dependencies
+│   │   │   ├── logging_impl.py
 │   │   │   └── paths.py         # Пути к директориям
 │   │   ├── repositories/
 │   │   │   ├── interfaces.py
@@ -81,20 +90,29 @@ Ai-agent/
 │   │   └── schemas/
 │   │       ├── user.py
 │   │       ├── report.py
-│   │       └── pipeline.py
+│   │       └── pipeline.py      # SectionName enum
 │   ├── promts/                  # Промпты для LLM (8 файлов)
 │   ├── reports/                 # Готовые DOCX-отчёты
 │   ├── tmp/                     # Временные файлы (не в git)
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.backend
+├── frontend/
+│   ├── app.js                   # Express-сервер, прокси к backend
+│   ├── auth.js                  # JWT-middleware фронтенда
+│   ├── public/
+│   │   ├── index.html           # SPA (login, main, profile, admin)
+│   │   ├── script.js            # Клиентская логика
+│   │   └── style.css
+│   ├── Dockerfile
+│   └── .env.frontend
 ├── docs/
 │   ├── TECHNICAL_DOCUMENTATION.md  # этот файл
 │   ├── LOCAL_SETUP.md
 │   ├── DOCKER_SETUP.md
 │   └── API_REFERENCE.md
 ├── docker-compose.yml
-└── README.md
+└── DEPLOY.md
 ```
 
 ---

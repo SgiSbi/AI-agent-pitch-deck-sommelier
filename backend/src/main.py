@@ -1,16 +1,30 @@
-from pathlib import Path
 import os
 
 from fastapi import FastAPI
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import select
 
 from .routes import users, debug, pipeline, admin
-from .db.session import get_db, async_engine, Base
+from .db.session import async_engine, Base, AsyncSessionLocal
+from .db.models import User
+from .modules.security import hash_password
 
 
 app = FastAPI(title="Pitch Deck Analyzer API")
 
-# Регистрация роутов из новой директории routes/
+_cors_origins = os.getenv("CORS_ORIGINS", "").split(",")
+_cors_origins = [o.strip() for o in _cors_origins if o.strip()]
+if not _cors_origins:
+    _cors_origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(pipeline.router)
 app.include_router(users.router)
 app.include_router(admin.router)
@@ -20,10 +34,9 @@ app.include_router(admin.router)
 @app.on_event("startup")
 async def on_startup() -> None:
     """
-    Инициализация/сброс схемы БД при старте приложения.
-    RESET_DB в .env.backend:
-      - False (по умолчанию): только создаём недостающие таблицы.
-      - True: полное удаление и пересоздание всех таблиц.
+    Инициализация БД при старте.
+    RESET_DB=True — полный сброс схемы.
+    ADMIN_LOGIN + ADMIN_PASSWORD — создаёт admin-пользователя если не существует.
     """
     reset_flag = os.getenv("RESET_DB", "False").lower() == "true"
     async with async_engine.begin() as conn:
@@ -31,4 +44,20 @@ async def on_startup() -> None:
             await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
-
+    admin_login = os.getenv("ADMIN_LOGIN")
+    admin_password = os.getenv("ADMIN_PASSWORD")
+    if admin_login and admin_password:
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(select(User).where(User.login == admin_login))
+            existing = result.scalar_one_or_none()
+            if existing is None:
+                user = User(
+                    login=admin_login,
+                    hashed_password=hash_password(admin_password),
+                    role="admin",
+                    is_active=True,
+                    is_whitelisted=True,
+                )
+                db.add(user)
+                await db.commit()
+                print(f"[startup] Admin user '{admin_login}' created.")
