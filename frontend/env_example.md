@@ -1,10 +1,15 @@
-Для запуска создаем файл с названием .env.frontend в текущей директории, т.е. /frontend со следующим содержанием:
+# Frontend environment variables
+# Copy this file content to frontend/.env.frontend and fill in the values
 
-# Telegram
-TELEGRAM_BOT_TOKEN=*токен телеграмм бота*
+# Internal backend URL (used by Node.js server, not the browser)
+BACKEND_URL=http://backend:8000
 
-# Адрес backend‑сервиса
-BACKEND_URL=*URL бэкенда, по умолчанию http://localhost:8000/process-pdf*
+# Public backend URL accessible from the browser (set to your server's public address)
+# Example: https://api.yourdomain.com or http://YOUR_SERVER_IP:8000
+PUBLIC_BACKEND_URL=http://localhost:8000
 
-MAX_FILE_SIZE=20971520
-BACKEND_TIMEOUT=120
+# Node.js server port
+PORT=3000
+
+# Backend request timeout in milliseconds (10 minutes)
+BACKEND_TIMEOUT=600000

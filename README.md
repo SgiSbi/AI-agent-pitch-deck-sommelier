@@ -1,89 +1,139 @@
-# ИИ-ассистент для автоматизированного анализа стартапа на венчурную инвестопригодность на основе презентации проекта
+# AI-ассистент для анализа стартап-презентаций
+
+Система автоматизированного анализа pitch-deck презентаций. Принимает PDF, анализирует через мультимодальные LLM и веб-поиск, возвращает структурированный инвестиционный отчёт в формате DOCX.
+
+## Быстрый старт
+
+- [Локальный запуск](docs/LOCAL_SETUP.md)
+- [Запуск через Docker](docs/DOCKER_SETUP.md)
+- [API Reference](docs/API_REFERENCE.md)
+- [Остальное](docs/TECHNICAL_DOCUMENTATION.md)
 
 ---
 
-## Инструкция по запуску 
+## Развёртывание
 
-Для запуска проекта убедитесь, что у вас установлены **Git**, **Docker** и **Docker Compose**.
+### Требования
 
-### 1. Клонирование репозитория
-Склонируйте проект на локальную машину:
+- Docker 24+ и Docker Compose v2+  
+  _или_ Python 3.12 и PostgreSQL 17
+
+### Шаг 1 — Клонировать репозиторий
+
 ```bash
-git clone https://github.com/Wizz4769/Ai-agent.git
+git clone <repo-url>
 cd Ai-agent
 ```
 
-### 2. Настройка Backend
-Перейдите в папку бэкенда и создайте файл переменных окружения:
+### Шаг 2 — Создать файл переменных окружения
+
+Создайте `backend/.env.backend`:
+
+```env
+# RouterAI — Qwen (vision)
+QWEN_API_KEY=<ключ от routerai.ru>
+QWEN_API_BASE=https://routerai.ru/api/v1
+QWEN_MODEL=qwen/qwen3-vl-32b-instruct
+
+# RouterAI — DeepSeek (reasoning)
+DEEPSEEK_API_KEY=<ключ от routerai.ru>
+DEEPSEEK_API_BASE=https://routerai.ru/api/v1
+DEEPSEEK_MODEL=deepseek/deepseek-r1-0528
+DEEPSEEK_QUERYGEN_MODEL=deepseek/deepseek-v3.2
+
+# Tavily Web Search
+TAVILY_API_KEY=<ключ от tavily.com>
+
+# PostgreSQL
+DBUSER=postgres
+DBPASSWORD=postgres
+DBHOST=database        # для Docker; для локального запуска — localhost
+DBPORT=5432
+DBNAME=ai_agent
+RESET_DB=False
+
+# JWT
+SECRET_KEY=<случайная строка, минимум 32 символа>
+ACCESS_TOKEN_EXPIRE_MINUTES=60
+```
+
+Получить ключи:
+- RouterAI: [routerai.ru](https://routerai.ru)
+- Tavily: [tavily.com](https://tavily.com)
+
+### Шаг 3 — Запустить
+
+**Docker (рекомендуется):**
+
 ```bash
+docker-compose up -d --build
+```
+
+**Локально:**
+
+```bash
+# Backend
 cd backend
-cp .env_example.md .env.backend 
+python -m venv .venv && .venv\Scripts\activate   # Windows
+# python -m venv .venv && source .venv/bin/activate  # Linux/macOS
+pip install -r requirements.txt
+uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-> Необходимо заполнить `.env.backend` необходимыми данными (api-ключи допступа к LLM, url api-базы, используемые модели, ключ доступа к Tavily).
-> ```env_example.md
-># Для запуска создаем файл с названием .env.backend в текущей директории, т.е. /backend со следующим содержанием:
->
-># Qwen
->QWEN_API_KEY=*API-ключ*
->QWEN_API_BASE=*url api базы*
->QWEN_MODEL=qwen/qwen3-vl-32b-instruct 
->
-># DeepSeek
->DEEPSEEK_API_KEY=*API-ключ*
->DEEPSEEK_API_BASE=*url api базы*
->DEEPSEEK_MODEL=deepseek/deepseek-r1-0528
->DEEPSEEK_QUERYGEN_MODEL=deepseek/deepseek-v3.2
->
-># Tavily (веб-поиск для промптов 2–5)
->TAVILY_API_KEY=*API-ключ от tavily.com*
-> ```
 
-### 3. Настройка Frontend
-Перейдите в папку фронтенда. Здесь необходимо создать два файла:
+### Шаг 4 — Создать администратора
+
 ```bash
-cd ../frontend
+# 1. Зарегистрировать пользователя
+curl -X POST http://localhost:8000/users/register \
+  -H "Content-Type: application/json" \
+  -d '{"login": "admin", "password": "yourpassword"}'
+
+# 2. Назначить роль admin (Docker)
+docker-compose exec database psql -U postgres -d ai_agent \
+  -c "UPDATE users SET role = 'admin' WHERE login = 'admin';"
+
+# 2. Назначить роль admin (локально, через psql)
+psql -U postgres -d ai_agent \
+  -c "UPDATE users SET role = 'admin' WHERE login = 'admin';"
 ```
 
-1.  **Создайте `.env.frontend`**:
-    ```bash
-    cp env_example.md .env.frontend
-    ```
-  > Необходимо заполнить `.env.frontend` необходимыми данными (telegram_bot_token, получить у t.me/@BotFather, backend_url можно использовать по умолчанию, в зависимости от порта на котором запущен
-  > сервер).
-  > ```env_example.md
-  ># Для запуска создаем файл с названием .env.frontend в текущей директории, т.е. /frontend со следующим содержанием:
-  >
-  ># Telegram
-  >TELEGRAM_BOT_TOKEN=*токен телеграмм бота*
-  >
-  ># Адрес backend‑сервиса
-  >BACKEND_URL=*URL бэкенда, по умолчанию http://backend:8000/process-pdf*
-  >
-  >MAX_FILE_SIZE=20971520
-  >BACKEND_TIMEOUT=720
-  > ```
+### Шаг 5 — Добавить пользователей в вайтлист
 
-2.  **Создайте `users_whitelist.json`**:
-    Этот файл необходим для управления доступом пользователей.
-    ```bash
-    touch users_whitelist.json
-    ```
-    *Пример структуры файла (вместо name вставить Telegram Username без @, вместо поля role вставить admin/standard):*
-    ```json
-    {
-      "users": {
-        "name": "role"
-      }
-    }
-    ```
+Только пользователи из вайтлиста (или администраторы) могут запускать анализ.
 
-### 4. Запуск через Docker Compose
-Вернитесь в корневую директорию проекта и запустите контейнеры:
 ```bash
-cd ..
-docker compose -f 'docker-compose.yml' up -d --build 
+# 1. Получить токен администратора
+curl -X POST http://localhost:8000/users/login \
+  -H "Content-Type: application/json" \
+  -d '{"login": "admin", "password": "yourpassword"}'
+
+# 2. Добавить пользователя в вайтлист (используя полученный токен)
+curl -X PATCH http://localhost:8000/admin/users/<user_id>/whitelist \
+  -H "Authorization: Bearer <admin_token>"
 ```
 
-После запуска приложение будет доступно в вашем телеграмм боте
+### Шаг 6 — Проверить работу
+
+Swagger UI: [http://localhost:8000/docs](http://localhost:8000/docs)
+
+```bash
+# Авторизоваться и запустить анализ
+curl -X POST http://localhost:8000/pipeline/process-pdf \
+  -H "Authorization: Bearer <token>" \
+  -F "file=@presentation.pdf" \
+  -o report.docx
+```
 
 ---
+
+## Стек
+
+| Компонент | Технология |
+|---|---|
+| API | FastAPI + Uvicorn |
+| БД | PostgreSQL 17 + SQLAlchemy (async) |
+| Vision LLM | Qwen VL 32B (RouterAI) |
+| Reasoning LLM | DeepSeek R1 (RouterAI) |
+| Веб-поиск | Tavily |
+| Авторизация | JWT (bcrypt + python-jose) |
+| Контейнеризация | Docker + Docker Compose |

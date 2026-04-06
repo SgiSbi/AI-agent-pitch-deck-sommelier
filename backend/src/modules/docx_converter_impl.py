@@ -1,18 +1,18 @@
-#!/usr/bin/env python3
-"""
-Утилиты для конвертации Markdown (.md) в DOCX.
-Используется пайплайном для генерации финального отчёта.
-"""
+from __future__ import annotations
 
 import re
+from pathlib import Path
+from typing import List
 from urllib.parse import urlparse
 
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
+from .interfaces import IDocxConverter
 
-def extract_domain(url: str) -> str:
+
+def _extract_domain(url: str) -> str:
     """Извлекает домен из URL с обрезкой длины."""
     try:
         parsed = urlparse(url)
@@ -26,7 +26,7 @@ def extract_domain(url: str) -> str:
         return url[:30] + "..." if len(url) > 30 else url
 
 
-def add_hyperlink(paragraph, text: str, url: str) -> None:
+def _add_hyperlink(paragraph, text: str, url: str) -> None:
     """Добавляет гиперссылку в параграф."""
     part = paragraph.part
     r_id = part.relate_to(
@@ -59,7 +59,7 @@ def add_hyperlink(paragraph, text: str, url: str) -> None:
     paragraph._p.append(hyperlink)
 
 
-def add_horizontal_line(doc: Document) -> None:
+def _add_horizontal_line(doc: Document) -> None:
     """Добавляет горизонтальную линию."""
     paragraph = doc.add_paragraph()
     p = paragraph._p
@@ -74,7 +74,7 @@ def add_horizontal_line(doc: Document) -> None:
     pPr.append(pBdr)
 
 
-def process_text_with_formatting(text: str) -> list[tuple[str, str, str | None]]:
+def _process_text_with_formatting(text: str) -> list[tuple[str, str, str | None]]:
     """
     Обрабатывает строку Markdown-текста.
     Возвращает список (тип, содержимое, url).
@@ -156,7 +156,7 @@ def process_text_with_formatting(text: str) -> list[tuple[str, str, str | None]]
     return result
 
 
-def add_formatted_text_to_paragraph(paragraph, text: str | None) -> None:
+def _add_formatted_text_to_paragraph(paragraph, text: str | None) -> None:
     """Добавляет форматированный текст в параграф."""
     if text is None:
         return
@@ -164,7 +164,7 @@ def add_formatted_text_to_paragraph(paragraph, text: str | None) -> None:
     if text == "---" or (text.startswith(":---") and text.endswith("---:")):
         return
 
-    parts = process_text_with_formatting(text)
+    parts = _process_text_with_formatting(text)
 
     for part_type, content, url in parts:
         if part_type == "text":
@@ -177,15 +177,15 @@ def add_formatted_text_to_paragraph(paragraph, text: str | None) -> None:
             run = paragraph.add_run(content)
             run.italic = True
         elif part_type == "link":
-            add_hyperlink(paragraph, content, url or "")
+            _add_hyperlink(paragraph, content, url or "")
         elif part_type == "url":
-            domain = extract_domain(content)
-            add_hyperlink(paragraph, domain, content)
+            domain = _extract_domain(content)
+            _add_hyperlink(paragraph, domain, content)
 
 
-def convert_md_to_docx(input_file: str, output_file: str) -> None:
+def _convert_md_to_docx(input_file: str | Path, output_file: str | Path) -> None:
     """Конвертирует Markdown в DOCX."""
-    with open(input_file, "r", encoding="utf-8") as f:
+    with open(str(input_file), "r", encoding="utf-8") as f:
         lines = f.readlines()
 
     doc = Document()
@@ -231,7 +231,7 @@ def convert_md_to_docx(input_file: str, output_file: str) -> None:
                             cell = table.cell(0, j)
                             cell.text = ""
                             paragraph = cell.paragraphs[0]
-                            add_formatted_text_to_paragraph(paragraph, cell_text)
+                            _add_formatted_text_to_paragraph(paragraph, cell_text)
                             for run in paragraph.runs:
                                 run.bold = True
 
@@ -241,22 +241,23 @@ def convert_md_to_docx(input_file: str, output_file: str) -> None:
                                 cell = table.cell(row_idx + 1, col_idx)
                                 cell.text = ""
                                 paragraph = cell.paragraphs[0]
-                                add_formatted_text_to_paragraph(paragraph, cell_text)
+                                _add_formatted_text_to_paragraph(paragraph, cell_text)
 
             continue
 
         if re.match(r"^(-{3,}|\*{3,}|_{3,})$", line):
-            add_horizontal_line(doc)
+            _add_horizontal_line(doc)
             i += 1
             continue
 
         if line.startswith("#"):
-            level = len(re.match(r"^#+", line).group())
+            level_match = re.match(r"^#+", line)
+            level = len(level_match.group()) if level_match else 1
             text = line.lstrip("#").strip()
 
             heading = doc.add_heading(level=min(level, 4))
             if text:
-                add_formatted_text_to_paragraph(heading, text)
+                _add_formatted_text_to_paragraph(heading, text)
 
             i += 1
             continue
@@ -272,18 +273,27 @@ def convert_md_to_docx(input_file: str, output_file: str) -> None:
                 paragraph = doc.add_paragraph(style="List Number")
 
             if content:
-                add_formatted_text_to_paragraph(paragraph, content)
+                _add_formatted_text_to_paragraph(paragraph, content)
 
             i += 1
             continue
 
         if line:
             paragraph = doc.add_paragraph()
-            add_formatted_text_to_paragraph(paragraph, line)
+            _add_formatted_text_to_paragraph(paragraph, line)
         else:
             doc.add_paragraph()
 
         i += 1
 
-    doc.save(output_file)
+    doc.save(str(output_file))
+
+
+class DocxConverterService(IDocxConverter):
+    """
+    Реализация IDocxConverter: конвертация markdown → DOCX.
+    """
+
+    def convert_md_to_docx(self, md_path: Path, docx_path: Path) -> None:
+        _convert_md_to_docx(md_path, docx_path)
 

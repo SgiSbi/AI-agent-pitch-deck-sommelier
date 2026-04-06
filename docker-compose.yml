@@ -1,4 +1,20 @@
 services:
+
+  database:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_agent}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     restart: unless-stopped
     env_file: backend/.env.backend
@@ -7,10 +23,12 @@ services:
       dockerfile: Dockerfile
     expose:
       - 8000
-    ports:
-      - "8000:8000"
+    depends_on:
+      database:
+        condition: service_healthy
     volumes:
-      - ./backend/tmp:/app/tmp
+      - ./backend/tmp:/backend/tmp
+      - ./backend/reports:/backend/reports
 
   frontend:
     restart: unless-stopped
@@ -20,5 +38,8 @@ services:
       dockerfile: Dockerfile
     depends_on:
       - backend
-    volumes:
-      - ./frontend/users_whitelist.json:/app/users_whitelist.json
+    ports:
+      - "80:3000"
+
+volumes:
+  pgdata:
