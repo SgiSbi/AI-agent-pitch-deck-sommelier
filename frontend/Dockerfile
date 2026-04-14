@@ -14,4 +14,6 @@ RUN npm install --production
 COPY . /app
 
 # Указываем команду для запуска приложения
+EXPOSE ${PORT:-3000}
+
 CMD ["npm", "start"]

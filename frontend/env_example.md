@@ -10,6 +10,7 @@ PUBLIC_BACKEND_URL=http://localhost:8000
 
 # Node.js server port
 PORT=3000
+FRONTEND_PORT=3000
 
 # Backend request timeout in milliseconds (10 minutes)
 BACKEND_TIMEOUT=600000
