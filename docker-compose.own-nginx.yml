@@ -1,0 +1,66 @@
+services:
+
+  database:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-ai_agent}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # Раскомментируй если нужен прямой доступ к БД с хоста (DBeaver и т.п.)
+    # Если порт 5432 занят — поменяй левую часть, например "5433:5432"
+    # ports:
+    #   - "${DB_HOST_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    restart: unless-stopped
+    env_file: backend/.env.backend
+    build:
+      context: backend
+      dockerfile: Dockerfile
+    expose:
+      - ${BACKEND_PORT:-8000}
+    depends_on:
+      database:
+        condition: service_healthy
+    volumes:
+      - ./backend/tmp:/backend/tmp
+      - ./backend/reports:/backend/reports
+
+  frontend:
+    restart: unless-stopped
+    env_file: frontend/.env.frontend
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+    expose:
+      - ${FRONTEND_PORT:-3000}
+    depends_on:
+      - backend
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-yourdomain.com}
+      BACKEND_PORT: ${BACKEND_PORT:-8000}
+      FRONTEND_PORT: ${FRONTEND_PORT:-3000}
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  pgdata:

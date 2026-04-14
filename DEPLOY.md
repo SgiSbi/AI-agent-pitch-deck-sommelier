@@ -22,12 +22,10 @@ mkdir -p backend/tmp backend/reports certbot/www certbot/conf
 
 ## 3. Настрой переменные окружения
 
-**`.env`** — корневой файл, параметры docker-compose:
-```bash
-cp .env.example .env   # если есть, иначе редактируй напрямую
-```
+**`.env`** — домен, порты, email для сертификата:
 ```dotenv
 DOMAIN=yourdomain.com
+CERTBOT_EMAIL=your@email.com
 BACKEND_PORT=8000
 FRONTEND_PORT=3000
 
@@ -36,7 +34,7 @@ POSTGRES_PASSWORD=надёжный_пароль
 POSTGRES_DB=ai_agent
 ```
 
-**`backend/.env.backend`** — скопируй из примера и заполни:
+**`backend/.env.backend`**:
 ```bash
 cp backend/env_example.md backend/.env.backend
 ```
@@ -50,38 +48,32 @@ SECRET_KEY=  # python -c "import secrets; print(secrets.token_hex(32))"
 CORS_ORIGINS=https://yourdomain.com
 ADMIN_LOGIN=admin
 ADMIN_PASSWORD=надёжный_пароль
-PORT=8000    # должен совпадать с BACKEND_PORT в .env
+PORT=8000
 ```
 
-**`frontend/.env.frontend`** — скопируй из примера и заполни:
+**`frontend/.env.frontend`**:
 ```bash
 cp frontend/env_example.md frontend/.env.frontend
 ```
 ```dotenv
-BACKEND_URL=http://backend:8000       # внутренний адрес, не менять
+BACKEND_URL=http://backend:8000
 PUBLIC_BACKEND_URL=https://yourdomain.com
-PORT=3000                             # должен совпадать с FRONTEND_PORT в .env
+PORT=3000
 FRONTEND_PORT=3000
 ```
 
+---
+
 ## 4. Получи TLS-сертификат
 
-Запусти временный nginx для верификации домена:
 ```bash
-docker compose --profile init up -d nginx-init
+sudo apt install certbot
+sudo certbot certonly --standalone -d yourdomain.com --email your@email.com --agree-tos --no-eff-email
 ```
 
-Получи сертификат (замени email):
-```bash
-docker compose --profile init run --rm certbot-init
-```
+Сертификат ляжет в `/etc/letsencrypt/live/yourdomain.com/` — nginx подхватит его автоматически.
 
-Останови временный nginx:
-```bash
-docker compose --profile init down
-```
-
-## 5. Запусти прод
+## 5. Запусти сервер
 
 ```bash
 docker compose up -d --build
@@ -91,13 +83,6 @@ docker compose up -d --build
 ```bash
 docker compose ps
 ```
-
-Все сервисы должны быть `running`:
-- `database`
-- `backend`
-- `frontend`
-- `nginx`
-- `certbot`
 
 Открой в браузере: `https://yourdomain.com`  
 Swagger UI: `https://yourdomain.com/docs`
@@ -129,11 +114,14 @@ docker compose logs -f frontend
 
 ## Обновление TLS-сертификата
 
-Certbot-контейнер обновляет сертификат автоматически каждые 12 часов.  
-После обновления нужно перезагрузить nginx. Добавь в cron:
+`certbot-renew` обновляет сертификат автоматически каждые 12 часов.  
+После обновления перезагрузи nginx:
 
 ```bash
-crontab -e
-# добавь строку:
+docker compose exec nginx nginx -s reload
+```
+
+Или в cron:
+```bash
 0 3 * * * docker compose -f /path/to/docker-compose.yml exec nginx nginx -s reload
 ```

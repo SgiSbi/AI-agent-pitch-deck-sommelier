@@ -6,6 +6,8 @@ backend/tmp/
 backend/reports/
 backend/result/
 backend/tmp/*
+backend/.env.backend.dev
+frontnd/.env.frontend.dev
 .venv/
 .vscode/
 frontend/.env.frontend

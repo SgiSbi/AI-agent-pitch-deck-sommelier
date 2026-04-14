@@ -41,32 +41,7 @@ services:
     depends_on:
       - backend
 
-  #   docker compose --profile init up nginx-init
-  #   docker compose --profile init run --rm certbot-init
-  nginx-init:
-    profiles: [init]
-    image: nginx:alpine
-    ports:
-      - "80:80"
-    volumes:
-      - ./nginx/nginx-init.conf:/etc/nginx/nginx.conf:ro
-      - ./certbot/www:/var/www/certbot:ro
-
-  certbot-init:
-    profiles: [init]
-    image: certbot/certbot
-    volumes:
-      - ./certbot/www:/var/www/certbot
-      - ./certbot/conf:/etc/letsencrypt
-    command: >
-      certonly --webroot
-      -w /var/www/certbot
-      -d perdimon.ru
-      --email your@email.com
-      --agree-tos --no-eff-email
-
-  # Шаг 2: полный стек с TLS — запускать через:
-  #   docker compose up -d --build
+  # Основной nginx с HTTPS (шаг 2, после получения сертификата)
   nginx:
     image: nginx:alpine
     restart: unless-stopped
@@ -79,19 +54,12 @@ services:
       FRONTEND_PORT: ${FRONTEND_PORT:-3000}
     volumes:
       - ./nginx/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
-      - ./certbot/www:/var/www/certbot:ro
-      - ./certbot/conf:/etc/letsencrypt:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - frontend
       - backend
 
-  certbot:
-    image: certbot/certbot
-    restart: unless-stopped
-    volumes:
-      - ./certbot/www:/var/www/certbot
-      - ./certbot/conf:/etc/letsencrypt
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
 
 volumes:
   pgdata:
