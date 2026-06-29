@@ -34,7 +34,21 @@ def ensure_dirs() -> None:
     REPORT_LOG_ROOT.mkdir(parents=True, exist_ok=True)
 
 
+_PROMPT_NO_SHARED = frozenset({
+    "_shared_output_rules.md",
+    "additional_prompt_for_websearch.md",
+    "text_extraction.md",
+})
+
+
 def load_prompt(filename: str) -> str:
     path = PROMPTS_DIR / filename
-    return path.read_text(encoding="utf-8")
+    body = path.read_text(encoding="utf-8")
+    if filename in _PROMPT_NO_SHARED or filename.startswith("_"):
+        return body
+    shared_path = PROMPTS_DIR / "_shared_output_rules.md"
+    if not shared_path.exists():
+        return body
+    shared = shared_path.read_text(encoding="utf-8").strip()
+    return f"{shared}\n\n---\n\n{body}"
 

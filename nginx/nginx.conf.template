@@ -21,22 +21,30 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
 
-    location ~ ^/(pipeline|users|admin|docs|openapi.json)(/|$) {
+    client_max_body_size 50m;
+
+    # FastAPI Swagger / OpenAPI (напрямую на backend, опционально)
+    location ~ ^/(docs|openapi\.json|redoc)(/|$) {
         proxy_pass http://backend:${BACKEND_PORT};
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-
-        client_max_body_size 50m;
-        proxy_read_timeout 300s;
     }
 
+    # SPA (/login, /generate, /reports, …) и /api/* (Express проксирует на backend внутри Docker)
     location / {
         proxy_pass http://frontend:${FRONTEND_PORT};
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Синхронная генерация отчёта может занимать до 10 минут
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
     }
 }

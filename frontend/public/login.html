@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Вход | Pitch Deck Analyzer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="top-nav"></div>
+  <div id="login-screen" class="screen active">
+    <div class="login-container">
+      <div class="login-box">
+        <h1>Pitch Deck Sommelier</h1>
+        <p class="subtitle">Быстрый AI-анализ презентаций</p>
+        <div id="login-panel">
+          <form id="login-form">
+            <div class="form-group"><input type="text" id="username" placeholder="Логин" required /></div>
+            <div class="form-group"><input type="password" id="password" placeholder="Пароль" required /></div>
+            <button type="submit" class="btn btn-primary btn-large">Войти</button>
+          </form>
+          <div id="login-error" class="error hidden"></div>
+          <!-- Восстановление пароля по email временно отключено
+          <p class="auth-switch">Забыли пароль? <a href="#" id="show-reset">Восстановить по email</a></p>
+          -->
+          <p class="auth-switch">Нет аккаунта? <a href="#" id="show-register">Зарегистрироваться</a></p>
+        </div>
+        <div id="register-panel" class="hidden">
+          <form id="register-form">
+            <div class="form-group"><input type="text" id="reg-username" placeholder="Логин" required /></div>
+            <!-- Email временно отключен
+            <div class="form-group"><input type="email" id="reg-email" placeholder="Email (для восстановления)" /></div>
+            -->
+            <div class="form-group"><input type="password" id="reg-password" placeholder="Пароль (мин. 6 символов)" required /></div>
+            <div class="form-group"><input type="password" id="reg-password2" placeholder="Повторите пароль" required /></div>
+            <button type="submit" class="btn btn-primary btn-large">Зарегистрироваться</button>
+          </form>
+          <div id="register-error" class="error hidden"></div>
+          <div id="register-success" class="info-box hidden"></div>
+          <p class="auth-switch">Уже есть аккаунт? <a href="#" id="show-login-from-register">Войти</a></p>
+        </div>
+        <!-- Восстановление пароля по email временно отключено
+        <div id="reset-panel" class="hidden">
+          <p class="muted reset-note">Укажите email, на него придет OTP-код для входа.</p>
+          <form id="reset-request-form">
+            <div class="form-group"><input type="email" id="reset-email" placeholder="Ваш email" required /></div>
+            <button type="submit" class="btn btn-primary btn-large">Отправить OTP</button>
+          </form>
+          <form id="reset-verify-form" class="hidden">
+            <div class="form-group"><input type="text" id="verify-otp" placeholder="OTP из письма" required /></div>
+            <button type="submit" class="btn btn-primary btn-large">Войти по OTP</button>
+          </form>
+          <div id="reset-message" class="info-box hidden"></div>
+          <div id="reset-error" class="error hidden"></div>
+          <p class="auth-switch"><a href="#" id="show-login-from-reset">Вернуться ко входу</a></p>
+        </div>
+        -->
+      </div>
+    </div>
+  </div>
+  <script src="common.js"></script>
+  <script src="login.js"></script>
+</body>
+</html>

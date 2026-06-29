@@ -4,6 +4,7 @@ import os
 import base64
 import json
 import time
+import concurrent.futures
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -49,6 +50,8 @@ class LLMConfig:
 
 
 config = LLMConfig()
+QWEN_MAX_RETRIES = 3
+QWEN_RETRY_DELAY_SECONDS = 10
 
 
 def _post_chat_completion(
@@ -96,6 +99,43 @@ class DefaultLLMClient(ILLMClient):
     Полная реализация ILLMClient на базе перенесённой логики из llm_clients.py и qwen_image.py.
     """
 
+    def _post_qwen_with_retries(self, payload: dict, timeout: int = 300) -> dict:
+        """
+        Унифицированный HTTP-вызов Qwen с ретраями:
+        до 3 попыток, пауза 10 секунд между попытками.
+        """
+        headers = {
+            "Authorization": f"Bearer {config.qwen_api_key}",
+            "Content-Type": "application/json",
+        }
+        url = config.qwen_api_base.rstrip("/") + "/chat/completions"
+        last_err: Exception | None = None
+
+        for attempt in range(1, QWEN_MAX_RETRIES + 1):
+            try:
+                resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+                resp.raise_for_status()
+                return resp.json()
+            except Exception as e:
+                last_err = e
+                default_logger.log(
+                    "QWEN",
+                    f"Request failed (attempt {attempt}/{QWEN_MAX_RETRIES}): {e}",
+                )
+                if attempt < QWEN_MAX_RETRIES:
+                    time.sleep(QWEN_RETRY_DELAY_SECONDS)
+
+        if isinstance(last_err, (RequestsConnectionError, Timeout)):
+            raise LLMConnectionError(
+                f"Нет соединения с Qwen-провайдером после {QWEN_MAX_RETRIES} попыток"
+            ) from last_err
+        if isinstance(last_err, HTTPError):
+            status_code = getattr(last_err.response, "status_code", "unknown")
+            raise LLMConnectionError(
+                f"Qwen-провайдер вернул ошибку {status_code} после {QWEN_MAX_RETRIES} попыток"
+            ) from last_err
+        raise RuntimeError("Qwen request failed after retries") from last_err
+
     def call_qwen_with_images(self, prompt: str, image_paths: List[str]) -> str:
         """
         Вызов Qwen для мульти‑модального анализа слайдов.
@@ -113,12 +153,15 @@ class DefaultLLMClient(ILLMClient):
             "content": f"{prompt}\n\nСписок файлов слайдов:\n" + "\n".join(image_paths),
         }
 
-        return _post_chat_completion(
-            base_url=config.qwen_api_base,
-            api_key=config.qwen_api_key,
-            model=config.qwen_model,
-            messages=[system_msg, user_msg],
-        )
+        payload = {
+            "model": config.qwen_model,
+            "messages": [system_msg, user_msg],
+        }
+        data = self._post_qwen_with_retries(payload=payload, timeout=300)
+        try:
+            return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            raise RuntimeError(f"Unexpected Qwen response format: {data}") from e
 
     def call_deepseek(self, prompt: str) -> str:
         """
@@ -180,21 +223,7 @@ class DefaultLLMClient(ILLMClient):
             "messages": messages,
         }
 
-        headers = {
-            "Authorization": f"Bearer {config.qwen_api_key}",
-            "Content-Type": "application/json",
-        }
-
-        url = config.qwen_api_base.rstrip("/") + "/chat/completions"
-        try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=300)
-            resp.raise_for_status()
-        except (RequestsConnectionError, Timeout) as e:
-            raise LLMConnectionError(f"Нет соединения с LLM-провайдером ({url}): {e}") from e
-        except HTTPError as e:
-            raise LLMConnectionError(f"LLM-провайдер вернул ошибку {e.response.status_code}: {e}") from e
-
-        data = resp.json()
+        data = self._post_qwen_with_retries(payload=payload, timeout=300)
         try:
             return data["choices"][0]["message"]["content"]
         except Exception as e:
@@ -286,103 +315,164 @@ class DefaultLLMClient(ILLMClient):
     ) -> str:
         """
         Извлечение текстовой информации из слайдов презентации через Qwen vision API.
-        Перенос логики из qwen_from_slides_stage.
+        Каждый слайд отправляется отдельным запросом параллельно.
         """
-        from .paths import load_prompt, QWEN_ROOT
+        from .paths import load_prompt, QWEN_ROOT, TEXT_FROM_SLIDES_ROOT
         
         prompt_text = load_prompt("text_extraction.md")
         
         # Создание директорий для сохранения
         qwen_dir = QWEN_ROOT / presentation_dir
         qwen_dir.mkdir(parents=True, exist_ok=True)
-        req_path = qwen_dir / "request.json"
-        resp_path = qwen_dir / "response.json"
+        
+        # Создание директории для финального текста
+        text_from_slides_dir = TEXT_FROM_SLIDES_ROOT / presentation_dir
+        text_from_slides_dir.mkdir(parents=True, exist_ok=True)
         
         default_logger.log("QWEN", f"Starting extraction for '{presentation_dir}' ({len(image_paths)} slides)")
         
-        # Формирование content с изображениями в base64
-        content_parts = [{"type": "text", "text": prompt_text}]
-        
-        for img_path_str in image_paths:
+        # Функция для обработки одного слайда
+        def process_single_slide(img_path_str: str, slide_num: int) -> str:
             img_path = Path(img_path_str)
             if not img_path.exists():
                 default_logger.log("QWEN", f"Warning: image not found: {img_path}")
-                continue
+                return f"Слайд #{slide_num}: Изображение не найдено - {img_path}"
             
+            default_logger.log("QWEN", f"Processing slide {slide_num}/{len(image_paths)}: {img_path.name}")
+            
+            # Чтение изображения и конвертация в base64
             with img_path.open("rb") as f:
                 b64 = base64.b64encode(f.read()).decode("ascii")
             
             data_url = f"data:image/png;base64,{b64}"
-            content_parts.append({
-                "type": "image_url",
-                "image_url": {"url": data_url}
-            })
-        
-        messages = [
-            {
-                "role": "system",
-                "content": "Ты анализируешь презентацию по изображениям слайдов."
-            },
-            {
-                "role": "user",
-                "content": content_parts
-            }
-        ]
-        
-        payload = {
-            "model": config.qwen_model,
-            "messages": messages,
-        }
-        
-        # Сохранение запроса (без base64 для читаемости)
-        payload_for_log = {
-            "model": config.qwen_model,
-            "messages": [
+            
+            # Формирование запроса в соответствии с форматом Qwen
+            # Qwen ожидает массив content с объектами type: "text" и type: "image_url"
+            messages = [
                 {
                     "role": "system",
                     "content": "Ты анализируешь презентацию по изображениям слайдов."
                 },
                 {
                     "role": "user",
-                    "content": f"{prompt_text}\n\n[{len(image_paths)} images in base64 format]"
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt_text
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": data_url
+                            }
+                        }
+                    ]
                 }
             ]
-        }
-        req_path.write_text(json.dumps(payload_for_log, ensure_ascii=False, indent=2), encoding="utf-8")
-        default_logger.log("QWEN", f"Request saved to: {req_path}")
-        
-        # HTTP вызов
-        headers = {
-            "Authorization": f"Bearer {config.qwen_api_key}",
-            "Content-Type": "application/json",
-        }
-        url = config.qwen_api_base.rstrip("/") + "/chat/completions"
-        
-        try:
-            resp = requests.post(url, json=payload, headers=headers, timeout=600)
-            resp.raise_for_status()
-            resp_json = resp.json()
             
-            # Сохранение ответа
-            resp_path.write_text(json.dumps(resp_json, ensure_ascii=False, indent=2), encoding="utf-8")
-            default_logger.log("QWEN", f"Response saved to: {resp_path}")
+            payload = {
+                "model": config.qwen_model,
+                "messages": messages,
+            }
+            
+            # Сохранение отдельного запроса для каждого слайда
+            req_path = qwen_dir / f"request_slide_{slide_num:03d}.json"
+            payload_for_log = {
+                "model": config.qwen_model,
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Ты анализируешь презентацию по изображениям слайдов."
+                    },
+                    {
+                        "role": "user",
+                        "content": f"{prompt_text}\n\n[1 image in base64 format: {img_path.name}]"
+                    }
+                ]
+            }
+            req_path.write_text(json.dumps(payload_for_log, ensure_ascii=False, indent=2), encoding="utf-8")
+            
+            try:
+                resp_json = self._post_qwen_with_retries(payload=payload, timeout=300)
+                
+                # Сохранение отдельного ответа для каждого слайда
+                resp_path = qwen_dir / f"response_slide_{slide_num:03d}.json"
+                resp_path.write_text(json.dumps(resp_json, ensure_ascii=False, indent=2), encoding="utf-8")
+                default_logger.log("QWEN", f"Response saved to: {resp_path}")
 
-            # Обновление статистики токенов
-            if stats is not None:
-                usage = resp_json.get("usage", {})
-                stats["input_tokens"] = stats.get("input_tokens", 0) + int(usage.get("prompt_tokens", 0))
-                stats["output_tokens"] = stats.get("output_tokens", 0) + int(usage.get("completion_tokens", 0))
+                # Обновление статистики токенов
+                if stats is not None:
+                    usage = resp_json.get("usage", {})
+                    stats["input_tokens"] = stats.get("input_tokens", 0) + int(usage.get("prompt_tokens", 0))
+                    stats["output_tokens"] = stats.get("output_tokens", 0) + int(usage.get("completion_tokens", 0))
 
-            content = resp_json["choices"][0]["message"]["content"]
-            if not isinstance(content, str):
-                raise TypeError(f"Qwen content is not a string: {type(content)}")
+                content = resp_json["choices"][0]["message"]["content"]
+                if not isinstance(content, str):
+                    raise TypeError(f"Qwen content is not a string: {type(content)}")
+                
+                default_logger.log("QWEN", f"Slide {slide_num} processed ({len(content)} chars)")
+                return content.strip()
+                
+            except Exception as e:
+                default_logger.log("QWEN", f"Error processing slide {slide_num}: {e}")
+                return f"Слайд #{slide_num}: Ошибка обработки - {str(e)}"
+        
+        # Параллельная обработка слайдов
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        all_responses = []
+        
+        with ThreadPoolExecutor(max_workers=max(1, len(image_paths))) as executor:
+            # Создаем задачи для каждого слайда
+            future_to_slide = {
+                executor.submit(process_single_slide, img_path_str, i+1): i+1
+                for i, img_path_str in enumerate(image_paths)
+            }
             
-            default_logger.log("QWEN", f"Extraction completed ({len(content)} chars)")
-            return content.strip()
-            
-        except Exception as e:
-            default_logger.log("QWEN", f"Error during extraction: {e}")
-            raise RuntimeError(f"Failed to extract information from images: {e}") from e
+            # Собираем результаты по мере завершения
+            for future in as_completed(future_to_slide):
+                slide_num = future_to_slide[future]
+                try:
+                    result = future.result()
+                    all_responses.append((slide_num, result))
+                except Exception as e:
+                    default_logger.log("QWEN", f"Exception in slide {slide_num}: {e}")
+                    all_responses.append((slide_num, f"Слайд #{slide_num}: Исключение - {str(e)}"))
+        
+        # Сортируем ответы по номеру слайда
+        all_responses.sort(key=lambda x: x[0])
+        
+        # Собираем все ответы в единый текст
+        combined_text = "\n\n".join(f"Слайд #{slide_num}:\n{content}" for slide_num, content in all_responses)
+        
+        # Сохраняем финальный текст в директорию text_from_slides
+        final_text_path = text_from_slides_dir / "extracted_text.txt"
+        final_text_path.write_text(combined_text, encoding="utf-8")
+        default_logger.log("QWEN", f"Final text saved to: {final_text_path}")
+        
+        # Также сохраняем в qwen_dir для обратной совместимости
+        old_resp_path = qwen_dir / "response.json"
+        old_resp_path.write_text(json.dumps({
+            "choices": [{"message": {"content": combined_text}}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0}
+        }, ensure_ascii=False, indent=2), encoding="utf-8")
+        
+        # Сохраняем отдельные результаты в json формате
+        structured_results = {
+            "slides": [
+                {
+                    "slide_number": slide_num,
+                    "content": content
+                }
+                for slide_num, content in all_responses
+            ]
+        }
+        
+        structured_json_path = text_from_slides_dir / "structured_results.json"
+        structured_json_path.write_text(json.dumps(structured_results, ensure_ascii=False, indent=2), encoding="utf-8")
+        
+        default_logger.log("QWEN", f"Extraction completed ({len(combined_text)} chars total, {len(image_paths)} slides)")
+        return combined_text.strip()
 
     def generate_tavily_queries(
         self, 
@@ -450,8 +540,17 @@ class DefaultLLMClient(ILLMClient):
             content = resp_json["choices"][0]["message"]["content"]
             default_logger.log("TAVILY_QUERYGEN", f"Parsing text response ({len(content)} chars)")
             
+            # Сохраним исходный текст для отладки
+            debug_path = query_gen_dir / "raw_content.txt"
+            debug_path.write_text(content, encoding="utf-8")
+            
             # Парсинг текстового ответа в структуру
             queries_by_category = self._parse_tavily_queries_text(content)
+            
+            # Логирование результата парсинга для отладки
+            default_logger.log("TAVILY_QUERYGEN", f"Parsed categories: {list(queries_by_category.keys())}")
+            for cat, queries in queries_by_category.items():
+                default_logger.log("TAVILY_QUERYGEN", f"  {cat}: {len(queries)} queries")
             
             if queries_by_category:
                 default_logger.log("TAVILY_QUERYGEN", f"Generated queries for {len(queries_by_category)} categories")
@@ -464,64 +563,74 @@ class DefaultLLMClient(ILLMClient):
             default_logger.log("TAVILY_QUERYGEN", f"Error generating queries: {e}")
             return {}
 
+    def _normalize_tavily_category(self, raw: str) -> str:
+        name = raw.strip()
+        lower = name.lower()
+        if name in ("Команда", "Team") or lower == "команда":
+            return "Команда"
+        if name in ("Рынок", "Market") or lower == "рынок":
+            return "Рынок"
+        if name in ("Конкуренция", "Competition") or lower == "конкуренция":
+            return "Конкуренция"
+        if name in ("Продукт", "Product") or lower == "продукт":
+            return "Продукт"
+        if "дополнительно" in lower or "юр" in lower:
+            return "Команда (дополнительно)"
+        if "редфлаг" in lower or "red flag" in lower:
+            return "Редфлаги"
+        if "трекшн" in lower or "traction" in lower:
+            return "Трекшн"
+        return name
+
     def _parse_tavily_queries_text(self, text: str) -> Dict[str, List[str]]:
         """
         Парсинг текстового ответа от DeepSeek в структуру запросов по категориям.
-        
+
         Ожидаемый формат:
         Команда:
         - "запрос 1"
         - "запрос 2"
-        
+
         Рынок:
         - "запрос 1"
         """
         queries_by_category: Dict[str, List[str]] = {}
-        current_category = None
-        
-        lines = text.strip().split('\n')
-        
-        for line in lines:
-            line = line.strip()
+        current_category: str | None = None
+
+        for raw_line in text.strip().split("\n"):
+            line = raw_line.strip()
             if not line:
                 continue
-            
-            # Проверка на категорию (заканчивается на ':')
-            if line.endswith(':'):
-                category_name = line[:-1].strip()
-                # Нормализация названий категорий
-                if category_name in ("Команда", "Team"):
-                    current_category = "Команда"
-                elif category_name in ("Рынок", "Market"):
-                    current_category = "Рынок"
-                elif category_name in ("Конкуренция", "Competition"):
-                    current_category = "Конкуренция"
-                elif category_name in ("Продукт", "Product"):
-                    current_category = "Продукт"
-                elif category_name in ("Команда (дополнительно)", "Team (additional)"):
-                    current_category = "Команда (дополнительно)"
-                elif "Редфлаг" in category_name or "Red flag" in category_name:
-                    current_category = "Редфлаги"
-                elif "Трекшн" in category_name or "Traction" in category_name:
-                    current_category = "Трекшн"
-                else:
-                    current_category = category_name
-                
-                if current_category not in queries_by_category:
-                    queries_by_category[current_category] = []
-            
-            # Проверка на запрос (начинается с '- ')
-            elif line.startswith('- ') and current_category:
+            if line.startswith("```"):
+                continue
+
+            if line.endswith(":") and not line.startswith("- "):
+                current_category = self._normalize_tavily_category(line[:-1])
+                queries_by_category.setdefault(current_category, [])
+                continue
+
+            if not current_category:
+                continue
+
+            query: str | None = None
+            if line.startswith("- ") or line.startswith("\\- "):
+                query = line[2:].strip() if line.startswith("- ") else line[3:].strip()
+            elif len(line) > 2 and line[0].isdigit() and line[1] in ".)":
                 query = line[2:].strip()
-                # Убираем кавычки если есть
-                if query.startswith('"') and query.endswith('"'):
-                    query = query[1:-1]
-                elif query.startswith("'") and query.endswith("'"):
-                    query = query[1:-1]
-                
-                if query and query != "Информация отсутствует.":
-                    queries_by_category[current_category].append(query)
-        
+            elif line.startswith("* "):
+                query = line[2:].strip()
+
+            if not query:
+                continue
+
+            if query.startswith('"') and query.endswith('"'):
+                query = query[1:-1].strip()
+            elif query.startswith("'") and query.endswith("'"):
+                query = query[1:-1].strip()
+
+            if query and query != "Информация отсутствует.":
+                queries_by_category[current_category].append(query)
+
         return queries_by_category
 
     def run_section(
@@ -616,6 +725,14 @@ class DefaultLLMClient(ILLMClient):
         ]
         
         md_parts: List[str] = [""] * len(section_prompts_files)
+        
+        # Логирование для отладки
+        default_logger.log("PIPELINE_DEBUG", f"Starting sections for '{presentation_dir}'")
+        default_logger.log("PIPELINE_DEBUG", f"tavily_queries_by_category is None: {tavily_queries_by_category is None}")
+        if tavily_queries_by_category:
+            default_logger.log("PIPELINE_DEBUG", f"Categories: {list(tavily_queries_by_category.keys())}")
+            for cat, queries in tavily_queries_by_category.items():
+                default_logger.log("PIPELINE_DEBUG", f"  {cat}: {len(queries)} queries")
         
         with ThreadPoolExecutor(max_workers=len(section_prompts_files)) as executor:
             future_to_idx = {}
@@ -747,9 +864,11 @@ class DefaultLLMClient(ILLMClient):
         }
         
         if prompt_name not in category_map:
+            default_logger.log("TAVILY_DEBUG", f"prompt_name '{prompt_name}' not in category_map")
             return None
         
         if not tavily_queries_by_category:
+            default_logger.log("TAVILY_DEBUG", f"tavily_queries_by_category is empty or None for '{prompt_name}'")
             return None
         
         selected_categories = category_map[prompt_name][:]
@@ -759,12 +878,17 @@ class DefaultLLMClient(ILLMClient):
             if global_cat in tavily_queries_by_category and global_cat not in selected_categories:
                 selected_categories.append(global_cat)
         
+        # Логирование выбранных категорий
+        default_logger.log("TAVILY_DEBUG", f"selected_categories for '{prompt_name}': {selected_categories}")
+        
         # Сбор уникальных запросов
         queries: List[str] = []
         seen: set[str] = set()
         
         for cat in selected_categories:
-            for q in tavily_queries_by_category.get(cat, []):
+            cat_queries = tavily_queries_by_category.get(cat, [])
+            default_logger.log("TAVILY_DEBUG", f"  category '{cat}' has {len(cat_queries)} queries")
+            for q in cat_queries:
                 qq = (q or "").strip()
                 if qq and qq not in seen:
                     seen.add(qq)
@@ -772,8 +896,10 @@ class DefaultLLMClient(ILLMClient):
         
         # Ограничение до 8 запросов
         queries = queries[:8]
+        default_logger.log("TAVILY_DEBUG", f"Collected {len(queries)} unique queries for '{prompt_name}': {queries}")
         
         if not queries:
+            default_logger.log("TAVILY_DEBUG", f"No queries collected for '{prompt_name}'")
             return None
         
         # Создание директорий
@@ -833,6 +959,8 @@ class DefaultLLMClient(ILLMClient):
         )
         
         return formatted_results
+
+
 
     def _save_section_log(
         self,

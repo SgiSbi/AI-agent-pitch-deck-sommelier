@@ -1,0 +1,24 @@
+{
+  "slides": [
+    {
+      "slide_number": 1,
+      "content": "Результат обработки слайда #1 из файла page_001.png"
+    },
+    {
+      "slide_number": 2,
+      "content": "Результат обработки слайда #2 из файла page_002.png"
+    },
+    {
+      "slide_number": 3,
+      "content": "Результат обработки слайда #3 из файла page_003.png"
+    },
+    {
+      "slide_number": 4,
+      "content": "Результат обработки слайда #4 из файла page_004.png"
+    },
+    {
+      "slide_number": 5,
+      "content": "Результат обработки слайда #5 из файла page_005.png"
+    }
+  ]
+}

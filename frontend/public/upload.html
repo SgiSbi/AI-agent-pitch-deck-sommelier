@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Генерация отчета</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="top-nav"></div>
+  <main class="main-content">
+    <div class="container">
+      <section class="card">
+        <h2>Загрузите PDF</h2>
+        <div class="form-group">
+          <label for="generation-mode">Режим генерации</label>
+          <select id="generation-mode" class="mode-select">
+            <option value="full">Полная</option>
+            <option value="partial">Частичная</option>
+          </select>
+        </div>
+        <div id="sections-wrap" class="sections-wrap hidden">
+          <p class="muted">Выберите нужные секции отчета:</p>
+          <label class="section-option"><input type="checkbox" value="1_info_from_pdf" /> Информация из презентации</label>
+          <label class="section-option"><input type="checkbox" value="2_market_analyze" /> Анализ рынка</label>
+          <label class="section-option"><input type="checkbox" value="3_competitors_analyze" /> Анализ конкурентов</label>
+          <label class="section-option"><input type="checkbox" value="4_product_analyze" /> Анализ продукта</label>
+          <label class="section-option"><input type="checkbox" value="5_team_analyze" /> Анализ команды</label>
+          <label class="section-option"><input type="checkbox" value="6_final_verdict" /> Финальный вердикт</label>
+        </div>
+        <div class="upload-area" id="upload-area">
+          <p class="upload-text">Перетащите PDF или нажмите для выбора</p>
+          <input type="file" id="file-input" accept=".pdf" hidden />
+        </div>
+        <div id="upload-info" class="info-box hidden"></div>
+        <button id="upload-btn" class="btn btn-primary btn-large hidden">Запустить генерацию</button>
+        <div id="upload-error" class="error hidden"></div>
+        <div id="upload-success" class="info-box hidden"></div>
+      </section>
+    </div>
+  </main>
+  <script src="common.js"></script>
+  <script src="upload.js"></script>
+</body>
+</html>

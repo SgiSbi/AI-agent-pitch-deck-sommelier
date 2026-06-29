@@ -4,9 +4,11 @@
 nginx запускается в Docker вместе с приложением и занимает порты 80 и 443.
 
 ```
-браузер → nginx контейнер (80/443) → frontend контейнер (3000)
-                                    → backend контейнер (8000)
+браузер → nginx контейнер (80/443) → frontend (3000) — SPA и /api/*
+                                    → backend (8000) — только /docs, /openapi.json
 ```
+
+Браузер не обращается к backend напрямую: Express на frontend проксирует `/api/*` на FastAPI внутри Docker-сети.
 
 ## Требования
 - Docker >= 24, Docker Compose >= 2.20
@@ -47,9 +49,9 @@ PORT=8000
 **`frontend/.env.frontend`**:
 ```dotenv
 BACKEND_URL=http://backend:8000
-PUBLIC_BACKEND_URL=https://yourdomain.com
 PORT=3000
 FRONTEND_PORT=3000
+BACKEND_TIMEOUT=600000
 ```
 
 ## 3. Получи TLS-сертификат

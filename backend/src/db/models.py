@@ -17,6 +17,9 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     login: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(255), unique=True, index=True, nullable=True)
+    reset_otp_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    reset_otp_expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
     role: Mapped[str] = mapped_column(String(32), default="standard")
     plan: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
@@ -64,6 +67,8 @@ class Report(Base):
     pdf_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     docx_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     report_log_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="processing", nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Статистика по конкретному отчёту
     input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)

@@ -16,7 +16,21 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 app.use(cors());
 app.use(express.json());
-app.use(express.static('public'));
+app.use(express.static('public', { index: false }));
+const publicPage = (name) => (_req, res) => res.sendFile(path.join(__dirname, 'public', name));
+app.get('/', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'home.html'));
+});
+app.get('/home', publicPage('home.html'));
+app.get('/login', publicPage('login.html'));
+app.get('/generate', publicPage('upload.html'));
+app.get('/reports', publicPage('reports.html'));
+app.get('/profile', publicPage('profile.html'));
+app.get('/admin', publicPage('admin.html'));
+app.get('/change-password', publicPage('change-password.html'));
+app.get('/index.html', (_req, res) => {
+  res.redirect(302, '/');
+});
 
 app.use((_req, res, next) => {
   res.setTimeout(600000, () => res.status(503).json({ error: 'Request timeout' }));
@@ -53,6 +67,37 @@ app.post('/api/auth/register', async (req, res) => {
   }
 });
 
+app.post('/api/auth/password-reset/request', async (req, res) => {
+  try {
+    const response = await axios.post(`${BACKEND_URL}/users/password-reset/request`, req.body);
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    const status = error.response?.status || 503;
+    const detail = error.response?.data?.detail || error.message;
+    res.status(status).json({ error: detail });
+  }
+});
+
+app.post('/api/auth/password-reset/verify', async (req, res) => {
+  try {
+    const response = await axios.post(`${BACKEND_URL}/users/password-reset/verify`, req.body);
+    const { access_token } = response.data;
+    const meResponse = await axios.get(`${BACKEND_URL}/users/me`, {
+      headers: { Authorization: `Bearer ${access_token}` },
+    });
+    res.status(response.status).json({
+      success: true,
+      access_token,
+      must_change_password: Boolean(response.data?.must_change_password),
+      ...meResponse.data,
+    });
+  } catch (error) {
+    const status = error.response?.status || 503;
+    const detail = error.response?.data?.detail || error.message;
+    res.status(status).json({ error: detail });
+  }
+});
+
 // Generic backend proxy (authenticated)
 async function proxyToBackend(req, res, { method, backendPath, body = null }) {
   try {
@@ -77,6 +122,13 @@ app.get('/api/users/me', authMiddleware.checkAuth, (req, res) =>
 
 app.get('/api/users/me/reports', authMiddleware.checkAuth, (req, res) =>
   proxyToBackend(req, res, { method: 'GET', backendPath: '/users/me/reports' }));
+
+app.patch('/api/users/me/email', authMiddleware.checkAuth, (req, res) =>
+  proxyToBackend(req, res, { method: 'PATCH', backendPath: '/users/me/email', body: req.body }));
+app.patch('/api/users/me/password', authMiddleware.checkAuth, (req, res) =>
+  proxyToBackend(req, res, { method: 'PATCH', backendPath: '/users/me/password', body: req.body }));
+app.patch('/api/users/me/password/otp', authMiddleware.checkAuth, (req, res) =>
+  proxyToBackend(req, res, { method: 'PATCH', backendPath: '/users/me/password/otp', body: req.body }));
 
 // Report download
 app.get('/api/pipeline/reports/:id/download', authMiddleware.checkAuth, async (req, res) => {
@@ -172,6 +224,124 @@ app.post('/api/process-pdf', authMiddleware.checkAuth, upload.single('file'), as
     } else {
       res.status(503).json({ error: 'Backend connection failed', details: error.message });
     }
+  }
+});
+
+app.post('/api/process-pdf/async', authMiddleware.checkAuth, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file provided' });
+    }
+    if (req.file.mimetype !== 'application/pdf') {
+      return res.status(400).json({ error: 'Only PDF files are allowed' });
+    }
+
+    const formData = new FormData();
+    formData.append('file', req.file.buffer, {
+      filename: req.file.originalname,
+      contentType: 'application/pdf',
+    });
+    const timeout = parseInt(process.env.BACKEND_TIMEOUT) || 600000;
+    const response = await axios.post(
+      `${BACKEND_URL}/pipeline/process-pdf/async`,
+      formData,
+      {
+        headers: {
+          ...formData.getHeaders(),
+          Authorization: `Bearer ${req.token}`,
+        },
+        timeout,
+      }
+    );
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 503).json({
+      error: error.response?.data?.detail || error.message,
+    });
+  }
+});
+
+app.post('/api/process-pdf/section', authMiddleware.checkAuth, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file provided' });
+    }
+    if (req.file.mimetype !== 'application/pdf') {
+      return res.status(400).json({ error: 'Only PDF files are allowed' });
+    }
+    if (!req.body.section) {
+      return res.status(400).json({ error: 'Section is required' });
+    }
+
+    const formData = new FormData();
+    formData.append('file', req.file.buffer, {
+      filename: req.file.originalname,
+      contentType: 'application/pdf',
+    });
+    formData.append('section', req.body.section);
+
+    const timeout = parseInt(process.env.BACKEND_TIMEOUT) || 600000;
+    const response = await axios.post(
+      `${BACKEND_URL}/pipeline/process-pdf/section`,
+      formData,
+      {
+        headers: {
+          ...formData.getHeaders(),
+          Authorization: `Bearer ${req.token}`,
+        },
+        timeout,
+        responseType: 'arraybuffer',
+      }
+    );
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', response.headers['content-disposition'] || 'attachment; filename="report-section.docx"');
+    res.setHeader('X-Input-Tokens', response.headers['x-input-tokens'] || '0');
+    res.setHeader('X-Output-Tokens', response.headers['x-output-tokens'] || '0');
+    res.setHeader('X-Tavily-Requests', response.headers['x-tavily-requests'] || '0');
+    res.send(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 503).json({
+      error: error.response?.data?.detail || error.message,
+    });
+  }
+});
+
+app.post('/api/process-pdf/section/async', authMiddleware.checkAuth, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file provided' });
+    }
+    if (req.file.mimetype !== 'application/pdf') {
+      return res.status(400).json({ error: 'Only PDF files are allowed' });
+    }
+    if (!req.body.section) {
+      return res.status(400).json({ error: 'Section is required' });
+    }
+
+    const formData = new FormData();
+    formData.append('file', req.file.buffer, {
+      filename: req.file.originalname,
+      contentType: 'application/pdf',
+    });
+    formData.append('section', req.body.section);
+    const timeout = parseInt(process.env.BACKEND_TIMEOUT) || 600000;
+    const response = await axios.post(
+      `${BACKEND_URL}/pipeline/process-pdf/section/async`,
+      formData,
+      {
+        headers: {
+          ...formData.getHeaders(),
+          Authorization: `Bearer ${req.token}`,
+        },
+        timeout,
+      }
+    );
+    res.status(response.status).json(response.data);
+  } catch (error) {
+    res.status(error.response?.status || 503).json({
+      error: error.response?.data?.detail || error.message,
+    });
   }
 });
 

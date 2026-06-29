@@ -25,9 +25,51 @@ class SqlAlchemyUserRepository(UserRepository, UserStatsRepository):
         result = await self.db.execute(select(User).order_by(User.id))
         return list(result.scalars().all())
 
-    async def create(self, login: str, hashed_password: str) -> User:
-        user = User(login=login, hashed_password=hashed_password)
+    async def get_by_email(self, email: str) -> Optional[User]:
+        result = await self.db.execute(select(User).where(User.email == email))
+        return result.scalar_one_or_none()
+
+    async def create(self, login: str, hashed_password: str, email: Optional[str] = None) -> User:
+        user = User(login=login, hashed_password=hashed_password, email=email)
         self.db.add(user)
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def set_reset_otp(self, user_id: int, otp_hash: str, expires_at: Any) -> Optional[User]:
+        user = await self.get_by_id(user_id)
+        if user is None:
+            return None
+        user.reset_otp_hash = otp_hash
+        user.reset_otp_expires_at = expires_at
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def clear_reset_otp(self, user_id: int) -> Optional[User]:
+        user = await self.get_by_id(user_id)
+        if user is None:
+            return None
+        user.reset_otp_hash = None
+        user.reset_otp_expires_at = None
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def set_email(self, user_id: int, email: str) -> Optional[User]:
+        user = await self.get_by_id(user_id)
+        if user is None:
+            return None
+        user.email = email
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def set_password_hash(self, user_id: int, hashed_password: str) -> Optional[User]:
+        user = await self.get_by_id(user_id)
+        if user is None:
+            return None
+        user.hashed_password = hashed_password
         await self.db.commit()
         await self.db.refresh(user)
         return user
@@ -86,6 +128,8 @@ class SqlAlchemyReportRepository(ReportRepository, PresentationReportRepository)
         pdf_path: Optional[str],
         docx_path: Optional[str],
         report_log_path: Optional[str],
+        status: str = "processing",
+        error_message: Optional[str] = None,
         input_tokens: int = 0,
         output_tokens: int = 0,
         tavily_requests: int = 0,
@@ -96,11 +140,58 @@ class SqlAlchemyReportRepository(ReportRepository, PresentationReportRepository)
             pdf_path=pdf_path,
             docx_path=docx_path,
             report_log_path=report_log_path,
+            status=status,
+            error_message=error_message,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             tavily_requests=tavily_requests,
         )
         self.db.add(report)
+        await self.db.commit()
+        await self.db.refresh(report)
+        return report
+
+    async def get_by_id(self, report_id: int) -> Optional[Report]:
+        result = await self.db.execute(select(Report).where(Report.id == report_id))
+        return result.scalar_one_or_none()
+
+    async def mark_completed(
+        self,
+        report_id: int,
+        docx_path: str,
+        report_log_path: str,
+        input_tokens: int,
+        output_tokens: int,
+        tavily_requests: int,
+    ) -> Optional[Report]:
+        report = await self.get_by_id(report_id)
+        if report is None:
+            return None
+        report.docx_path = docx_path
+        report.report_log_path = report_log_path
+        report.status = "completed"
+        report.error_message = None
+        report.input_tokens = input_tokens
+        report.output_tokens = output_tokens
+        report.tavily_requests = tavily_requests
+
+        if report.user_id is not None:
+            user = await self.db.get(User, report.user_id)
+            if user is not None:
+                user.total_input_tokens += input_tokens
+                user.total_output_tokens += output_tokens
+                user.total_tavily_requests += tavily_requests
+
+        await self.db.commit()
+        await self.db.refresh(report)
+        return report
+
+    async def mark_failed(self, report_id: int, error_message: str) -> Optional[Report]:
+        report = await self.get_by_id(report_id)
+        if report is None:
+            return None
+        report.status = "failed"
+        report.error_message = error_message
         await self.db.commit()
         await self.db.refresh(report)
         return report

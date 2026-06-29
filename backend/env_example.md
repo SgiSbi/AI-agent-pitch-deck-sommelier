@@ -7,8 +7,8 @@ QWEN_API_BASE=https://routerai.ru/api/v1
 QWEN_MODEL=qwen/qwen3-vl-32b-instruct
 DEEPSEEK_API_KEY=
 DEEPSEEK_API_BASE=https://routerai.ru/api/v1
-DEEPSEEK_MODEL=deepseek/deepseek-r1-0528
-DEEPSEEK_QUERYGEN_MODEL=deepseek/deepseek-v3.2
+DEEPSEEK_MODEL=deepseek/deepseek-v4-flash
+DEEPSEEK_QUERYGEN_MODEL=deepseek/deepseek-v4-flash
 
 # Tavily search
 TAVILY_API_KEY=
@@ -32,3 +32,10 @@ CORS_ORIGINS=http://localhost:3000
 # Initial admin user (created on first startup if not exists)
 ADMIN_LOGIN=
 ADMIN_PASSWORD=
+
+# SMTP (for password reset OTP emails)
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_SENDER=

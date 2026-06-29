@@ -46,7 +46,8 @@ class ILLMClient(Protocol):
     def extract_information_from_images(
         self, 
         image_paths: List[str], 
-        presentation_dir: str
+        presentation_dir: str,
+        stats: Optional[Dict[str, int]] = None
     ) -> str:
         """Этап 2: Извлечение информации из слайдов через Qwen (vision)."""
         ...

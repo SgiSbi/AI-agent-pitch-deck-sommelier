@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Профиль</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="top-nav"></div>
+  <main class="main-content"><div class="container">
+    <section class="card"><h2>Информация</h2><div id="profile-error" class="error hidden"></div><div id="profile-info" class="stats"></div></section>
+    <!-- Email временно отключен
+    <section class="card">
+      <h2>Email для восстановления</h2>
+      <form id="email-form">
+        <div class="form-group">
+          <input type="email" id="email-input" placeholder="name@example.com" required />
+        </div>
+        <button type="submit" class="btn btn-primary">Сохранить email</button>
+      </form>
+      <div id="email-success" class="info-box hidden"></div>
+      <div id="email-error" class="error hidden"></div>
+    </section>
+    -->
+    <section class="card">
+      <h2>Смена пароля</h2>
+      <form id="password-form">
+        <div class="form-group"><input type="password" id="old-password" placeholder="Старый пароль" required /></div>
+        <div class="form-group"><input type="password" id="new-password" placeholder="Новый пароль" required /></div>
+        <div class="form-group"><input type="password" id="new-password-repeat" placeholder="Повторите новый пароль" required /></div>
+        <button type="submit" class="btn btn-primary">Сменить пароль</button>
+      </form>
+      <div id="password-success" class="info-box hidden"></div>
+      <div id="password-error" class="error hidden"></div>
+    </section>
+  </div></main>
+  <script src="common.js"></script>
+  <script src="profile.js"></script>
+</body>
+</html>

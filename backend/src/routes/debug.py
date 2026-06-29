@@ -59,7 +59,8 @@ async def debug_markdown_from_pdf(
     # Все LLM операции через интерфейс ILLMClient
     qwen_text = service.llm_client.extract_information_from_images(
         image_paths=image_paths,
-        presentation_dir=presentation_dir
+        presentation_dir=presentation_dir,
+        stats=None
     )
     
     tavily_queries = service.llm_client.generate_tavily_queries(

@@ -244,6 +244,26 @@ class PipelineService:
 
         return docx_path, stats
 
+    async def run_full_pipeline_only(
+        self,
+        pdf_path: Path,
+        presentation_dir: str,
+        user_label: Optional[str] = None,
+    ) -> Tuple[Path, Dict[str, int]]:
+        """
+        Запуск полного пайплайна без записи отчета в БД.
+        Используется для фоновой обработки, где запись создается заранее.
+        """
+        try:
+            return await anyio.to_thread.run_sync(
+                self._run_full_pipeline_sync,
+                pdf_path,
+                presentation_dir,
+                user_label,
+            )
+        except LLMConnectionError as e:
+            raise HTTPException(status_code=503, detail=f"Ошибка соединения с LLM-провайдером: {e}") from e
+
 
     def _run_single_section_sync(
         self,
@@ -383,6 +403,28 @@ class PipelineService:
             )
 
         return docx_path, stats
+
+    async def run_single_section_only(
+        self,
+        pdf_path: Path,
+        presentation_dir: str,
+        section: str,
+        user_label: Optional[str] = None,
+    ) -> Tuple[Path, Dict[str, int]]:
+        """
+        Генерация одной секции без записи отчета в БД.
+        Используется для фоновой обработки.
+        """
+        try:
+            return await anyio.to_thread.run_sync(
+                self._run_single_section_sync,
+                pdf_path,
+                presentation_dir,
+                section,
+                user_label,
+            )
+        except LLMConnectionError as e:
+            raise HTTPException(status_code=503, detail=f"Ошибка соединения с LLM-провайдером: {e}") from e
 
 
     async def get_report_docx(

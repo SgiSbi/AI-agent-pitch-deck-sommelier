@@ -21,6 +21,8 @@ class ReportRead(BaseModel):
     pdf_path: Optional[str] = None
     docx_path: Optional[str] = None
     report_log_path: Optional[str] = None
+    status: str = "processing"
+    error_message: Optional[str] = None
     input_tokens: int = 0
     output_tokens: int = 0
     tavily_requests: int = 0
